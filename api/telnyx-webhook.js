@@ -1,32 +1,32 @@
 export default async function handler(req, res) {
-  // Always set XML content type immediately for Telnyx TeXML
   res.setHeader('Content-Type', 'text/xml');
-  const normalResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
+  
+  // TeXML to speak aloud to the caller and then hang up gracefully
+  const audioResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <!-- Allow normal call handling/ringing -->
+    <Say voice="alice">We will be with you shortly.</Say>
+    <Hangup />
 </Response>`;
 
   try {
     let body = req.body || {};
     if (typeof body === 'string') {
-      try { body = JSON.parse(body); } 
-      catch (e) {
-        try { body = Object.fromEntries(new URLSearchParams(body).entries()); } catch (err) {}
+      try { 
+        body = JSON.parse(body); 
+      } catch (e) {
+        try { 
+          body = Object.fromEntries(new URLSearchParams(body).entries()); 
+        } catch (err) {}
       }
     }
 
     const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-
-    // customerPhone is the person who called (+1615...)
-    // myTelnyxNumber is your Heartland Dispatch number (+16156408506)
     const customerPhone = body.From || body.from || body.data?.payload?.from;
     const myTelnyxNumber = body.To || body.to || body.data?.payload?.to;
 
-    console.log(`Inbound Call Detected -> From: ${customerPhone} | To: ${myTelnyxNumber}`);
-
-    // Automatically send the SMS text-back to the caller
+    // Trigger the automated text-back
     if (customerPhone && myTelnyxNumber) {
-      console.log(`Sending automated text-back to customer: ${customerPhone}`);
+      console.log(`Attempting SMS to ${customerPhone} from ${myTelnyxNumber}...`);
       
       const smsRes = await fetch('https://api.telnyx.com/v2/messages', {
         method: 'POST',
@@ -42,14 +42,12 @@ export default async function handler(req, res) {
       });
 
       const smsData = await smsRes.json();
-      console.log('Telnyx SMS Delivery Result:', JSON.stringify(smsData));
-    } else {
-      console.warn('Could not send SMS: Missing customerPhone or myTelnyxNumber in request payload.');
+      console.log('Telnyx SMS Response:', JSON.stringify(smsData));
     }
 
-    return res.status(200).send(normalResponseXml);
+    return res.status(200).send(audioResponseXml);
   } catch (error) {
-    console.error('Webhook Execution Error:', error.message);
-    return res.status(200).send(normalResponseXml);
+    console.error('Webhook Error:', error.message);
+    return res.status(200).send(audioResponseXml);
   }
 }
