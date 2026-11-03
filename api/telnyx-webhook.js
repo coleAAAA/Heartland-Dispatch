@@ -6,93 +6,57 @@ export default async function handler(req, res) {
   const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
   const MY_MOBILE_PHONE = process.env.MY_MOBILE_PHONE;
 
-  // 1. TeXML Call Handling: Immediately return valid TeXML to reject/hang up call without cost
-  const isTeXMLCall = req.body?.CallSid || req.body?.data?.payload?.call_control_id || req.body?.data?.event_type === 'call.initiated';
-
-  if (isTeXMLCall) {
-    res.setHeader('Content-Type', 'text/xml');
-    const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+  // Always force XML response headers for Telnyx TeXML
+  res.setHeader('Content-Type', 'text/xml');
+  const rejectXml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Reject />
 </Response>`;
 
-    const customerPhone = req.body?.From || req.body?.data?.payload?.from;
-    const myTelnyxNumber = req.body?.To || req.body?.data?.payload?.to;
+  // 1. Handle Inbound Call (Form Data or JSON Payload)
+  const customerPhone = req.body?.From || req.body?.from || req.body?.data?.payload?.from;
+  const myTelnyxNumber = req.body?.To || req.body?.to || req.body?.data?.payload?.to;
+  const eventType = req.body?.data?.event_type;
 
-    if (customerPhone && myTelnyxNumber) {
-      fetch('https://api.telnyx.com/v2/messages', {
+  // Handle forward of inbound SMS text replies
+  if (eventType === 'message.received') {
+    const textMsg = req.body?.data?.payload?.text;
+    const sender = req.body?.data?.payload?.from;
+    const recipient = req.body?.data?.payload?.to;
+
+    if (sender && sender !== MY_MOBILE_PHONE) {
+      await fetch('https://api.telnyx.com/v2/messages', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${TELNYX_API_KEY}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          from: myTelnyxNumber,
-          to: customerPhone,
-          text: "Hey, this is Heartland Dispatch! Saw we missed your call. What HVAC/plumbing issue can we help you with right now? Text me details or photos here."
+          from: recipient,
+          to: MY_MOBILE_PHONE,
+          text: `[NEW LEAD - ${sender}]: ${textMsg}`
         })
-      }).catch(err => console.error('Telnyx SMS Trigger Error:', err.message));
+      }).catch(err => console.error('SMS Forward Error:', err.message));
     }
-
-    return res.status(200).send(xmlResponse);
+    return res.status(200).send(rejectXml);
   }
 
-  // 2. Standard Telnyx Webhooks (Call Progress & SMS Inbound)
-  try {
-    const event = req.body?.data;
-    if (!event) {
-      res.setHeader('Content-Type', 'text/xml');
-      return res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Reject/></Response>');
-    }
-
-    const eventType = event.event_type;
-
-    if (eventType === 'call.hangup') {
-      const callStatus = event.payload?.hangup_cause;
-      const customerPhone = event.payload?.from;
-      const myTelnyxNumber = event.payload?.to;
-
-      if (['ORIGINATOR_CANCEL', 'NORMAL_CLEARING', 'USER_BUSY', 'NO_ANSWER'].includes(callStatus)) {
-        await fetch('https://api.telnyx.com/v2/messages', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${TELNYX_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            from: myTelnyxNumber,
-            to: customerPhone,
-            text: "Hey, this is Heartland Dispatch! Saw we missed your call. What HVAC/plumbing issue can we help you with right now? Text me details or photos here."
-          })
-        });
-      }
-    }
-
-    if (eventType === 'message.received') {
-      const customerPhone = event.payload?.from;
-      const customerText = event.payload?.text;
-      const myTelnyxNumber = event.payload?.to;
-
-      if (customerPhone && customerPhone !== MY_MOBILE_PHONE) {
-        await fetch('https://api.telnyx.com/v2/messages', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${TELNYX_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            from: myTelnyxNumber,
-            to: MY_MOBILE_PHONE,
-            text: `[NEW LEAD - ${customerPhone}]: ${customerText}`
-          })
-        });
-      }
-    }
-
-    return res.status(200).json({ status: 'success' });
-  } catch (error) {
-    console.error('Telnyx Webhook Error:', error.message);
-    res.setHeader('Content-Type', 'text/xml');
-    return res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Reject/></Response>');
+  // 2. Trigger Missed-Call Automated Text
+  if (customerPhone && myTelnyxNumber) {
+    fetch('https://api.telnyx.com/v2/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${TELNYX_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: myTelnyxNumber,
+        to: customerPhone,
+        text: "Hey, this is Heartland Dispatch! Saw we missed your call. What HVAC/plumbing issue can we help you with right now? Text me details or photos here."
+      })
+    }).catch(err => console.error('Telnyx SMS Trigger Error:', err.message));
   }
+
+  // Always return valid TeXML to drop the call gracefully
+  return res.status(200).send(rejectXml);
 }
