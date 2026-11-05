@@ -30,15 +30,13 @@ export default async function handler(req, res) {
     }
 
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
-    // Use SUPABASE_SUPER_SECRET_KEY to ensure backend writes never fail due to RLS policies
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
 
     const payload = {
       client_name: client_name || "Heartland Dispatch Client",
       contractor_phone: String(contractor_phone).trim(),
       forward_number: String(forward_number).trim(),
-      email: email ? String(email).trim() : null,
-      status: 'pending_trial'
+      email: email ? String(email).trim() : null
     };
 
     console.log("Saving lead to Supabase:", payload);
