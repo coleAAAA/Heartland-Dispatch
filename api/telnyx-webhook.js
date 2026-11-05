@@ -1,6 +1,4 @@
-// --- FULLY SELF-CONTAINED TELNYX + SUPABASE WEBHOOK HANDLER ---
-
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   try {
     let body = req.body || {};
     if (typeof body === 'string') {
@@ -16,12 +14,8 @@ export default async function handler(req, res) {
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
 
-    // Standardize incoming Telnyx number format with leading '+'
-    let rawTo = body.To || body.to || body.data?.payload?.to;
-    let myTelnyxNumber = rawTo ? (rawTo.startsWith('+') ? rawTo : `+${rawTo}`) : null;
-    const customerPhone = body.From || body.from || body.data?.payload?.from;
-
-    console.log(`Inbound Call from ${customerPhone} to Telnyx line ${myTelnyxNumber}`);
+    let rawTo = body.To || body.to || body.data?.payload?.to || "";
+    let myTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
 
     let forwardNumber = null;
 
@@ -42,38 +36,30 @@ export default async function handler(req, res) {
           const rows = await dbResponse.json();
           if (rows && rows.length > 0 && rows[0].forward_number) {
             forwardNumber = rows[0].forward_number;
-            console.log(`Found matching forward number: ${forwardNumber}`);
           }
-        } else {
-          console.error('Supabase REST query failed status:', dbResponse.status);
         }
       } catch (dbErr) {
-        console.error('Database fetch error:', dbErr.message);
+        console.error('Database error:', dbErr.message);
       }
     }
 
     res.setHeader('Content-Type', 'text/xml');
 
-    let audioResponseXml = '';
-
     if (forwardNumber) {
-      audioResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Thank you for reaching out! Connecting you to our emergency team now.</Say>
+    <Say voice="alice">Thank you for reaching out! Connecting you to our team now.</Say>
     <Dial timeout="20">${forwardNumber}</Dial>
-</Response>`;
+</Response>`);
     } else {
-      audioResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Thank you for reaching out to us! We will have a team member with you shortly to address the problem.</Say>
     <Hangup />
-</Response>`;
+</Response>`);
     }
 
-    return res.status(200).send(audioResponseXml);
-
   } catch (error) {
-    console.error('Webhook Error:', error.message);
     res.setHeader('Content-Type', 'text/xml');
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -81,5 +67,4 @@ export default async function handler(req, res) {
     <Hangup />
 </Response>`);
   }
-}
-}
+};
