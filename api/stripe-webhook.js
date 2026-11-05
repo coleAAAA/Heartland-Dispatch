@@ -1,4 +1,7 @@
 import { buffer } from 'micro';
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Disable default body parser so Stripe signature verification works
 export const config = {
@@ -13,17 +16,25 @@ export default async function handler(req, res) {
   }
 
   const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
-  const SUPABASE_ANON_KEY = "process.env.SUPABASE_SERVICE_ROLE_KEY";
+  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const sig = req.headers['stripe-signature'];
+  let event;
 
   try {
     const rawBody = await buffer(req);
-    const event = JSON.parse(rawBody.toString());
+    
+    // Securely verify using your exact Vercel environment variable name
+    event = stripe.webhooks.constructEvent(
+      rawBody, 
+      sig, 
+      process.env.STRIPE_SECRET_WEBHOOK_KEY
+    );
 
     // 1. SUCCESSFUL CHECKOUT (Trial started or paid)
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
       
-      // Pull custom metadata passed from your website checkout button
       const contractorPhone = session.metadata?.contractor_phone; // e.g. "+15623744750"
       const forwardNumber = session.metadata?.forward_number || contractorPhone; // Cell phone to ring
       const clientName = session.metadata?.client_name || session.customer_details?.name;
@@ -31,12 +42,12 @@ export default async function handler(req, res) {
       const stripeSubscriptionId = session.subscription;
 
       if (contractorPhone) {
-        // Upsert contractor into Supabase with active status
+        // Upsert contractor into Supabase with active status using the service role key (bypasses RLS safely)
         await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients`, {
           method: 'POST',
           headers: {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'apikey': SUPABASE_SERVICE_ROLE_KEY,
+            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
             'Content-Type': 'application/json',
             'Prefer': 'resolution=merge-duplicates'
           },
@@ -61,8 +72,8 @@ export default async function handler(req, res) {
       await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients?stripe_customer_id=eq.${stripeCustomerId}`, {
         method: 'PATCH',
         headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'apikey': SUPABASE_SERVICE_ROLE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
