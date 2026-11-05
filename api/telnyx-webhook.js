@@ -1,6 +1,5 @@
 import { Resend } from 'resend';
 
-// Initialize Resend with your API Key from Vercel Environment Variables
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export default async function handler(req, res) {
@@ -23,19 +22,19 @@ export default async function handler(req, res) {
     const rawTo = body.To || body.to || body.data?.payload?.to || "";
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
-    const digitsEntered = body.Digits || body.digits || body.data?.payload?.digits || "";
     
-    // Check if this is the callback step after keypad input
-    const isRoutingStep = req.query.step === 'route' || Boolean(digitsEntered);
+    const currentStep = req.query.step || '';
+    const digitsEntered = req.query.digits || body.Digits || body.digits || body.data?.payload?.digits || "";
+    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // STEP 2: Caller entered the 10-digit contractor phone number
-    if (isRoutingStep && digitsEntered) {
+    // STEP 3: Voice summary recorded -> Send Resend Email -> Dial Contractor Line
+    if (currentStep === 'route') {
       let cleanDigits = digitsEntered.replace(/\D/g, '');
       if (cleanDigits.length === 10) {
         cleanDigits = `+1${cleanDigits}`;
-      } else if (!cleanDigits.startsWith('+')) {
+      } else if (cleanDigits.length > 0 && !cleanDigits.startsWith('+')) {
         cleanDigits = `+${cleanDigits}`;
       }
 
@@ -45,8 +44,12 @@ export default async function handler(req, res) {
       let clientName = null;
 
       try {
-        // Query contractor details including email from Supabase
-        const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?contractor_phone=eq.${encodeURIComponent(cleanDigits)}&select=forward_number,status,email,client_name`;
+        let queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone`;
+        if (cleanDigits) {
+          queryUrl += `&contractor_phone=eq.${encodeURIComponent(cleanDigits)}`;
+        } else {
+          queryUrl += `&order=id.desc&limit=1`;
+        }
         
         const dbResponse = await fetch(queryUrl, {
           method: 'GET',
@@ -60,8 +63,8 @@ export default async function handler(req, res) {
         if (dbResponse.ok) {
           const rows = await dbResponse.json();
           if (rows && rows.length > 0) {
-            forwardNumber = rows[0].forward_number;
-            subscriptionStatus = rows[0].status;
+            forwardNumber = rows[0].forward_number || rows[0].contractor_phone;
+            subscriptionStatus = rows[0].status || 'pending_trial';
             contractorEmail = rows[0].email;
             clientName = rows[0].client_name || "Contractor";
           }
@@ -70,44 +73,43 @@ export default async function handler(req, res) {
         console.error('Database query error:', dbErr.message);
       }
 
-      // Check active subscription status
-      if (forwardNumber && subscriptionStatus === 'active') {
+      if (forwardNumber && (subscriptionStatus === 'active' || subscriptionStatus === 'pending_trial')) {
         
-        // Trigger Instant Auto-Email Alert via Resend
+        // Trigger automated email via Resend to contractor's email from index.html
         if (contractorEmail) {
           try {
             await resend.emails.send({
-              from: 'Dispatch System <alerts@yourdomain.com>', // Replace with your verified sender domain or resend default
+              from: process.env.RESEND_FROM_EMAIL || 'Heartland Dispatch <onboarding@resend.dev>',
               to: contractorEmail,
-              subject: `🚨 Incoming Emergency Dispatch Call - ${callerNumber}`,
+              subject: `🚨 Emergency Call Alert - Call from ${callerNumber}`,
               html: `
-                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-                  <h2 style="color: #d9534f;">🚨 New Emergency Call Connected</h2>
+                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee;">
+                  <h2 style="color: #000; text-transform: uppercase;">🚨 New Emergency Call Dispatched</h2>
                   <p>Hello <strong>${clientName}</strong>,</p>
-                  <p>An urgent call was just routed to your mobile dispatch line.</p>
-                  <table style="width: 100%; max-width: 400px; border-collapse: collapse; margin: 20px 0;">
-                    <tr>
-                      <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ccc;">Caller Number:</td>
-                      <td style="padding: 8px; border-bottom: 1px solid #ccc;">${callerNumber}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ccc;">Time:</td>
-                      <td style="padding: 8px; border-bottom: 1px solid #ccc;">${new Date().toLocaleString()}</td>
-                    </tr>
-                  </table>
-                  <p style="font-size: 12px; color: #777;">This automated dispatch notice was sent by your platform.</p>
+                  <p>An emergency caller was just connected to your dispatch line.</p>
+                  
+                  <div style="background-color: #f9f9f9; padding: 15px; margin: 15px 0; font-family: monospace;">
+                    <p style="margin: 4px 0;"><strong>Caller Phone:</strong> ${callerNumber}</p>
+                    <p style="margin: 4px 0;"><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
+                    ${recordingUrl ? `<p style="margin: 4px 0;"><strong>Voice Summary Audio:</strong> <a href="${recordingUrl}" target="_blank" style="color: #000; text-decoration: underline;">Listen To Audio Summary</a></p>` : ''}
+                  </div>
+                  
+                  <p style="font-size: 11px; color: #888; margin-top: 20px;">Heartland Dispatch Automated System</p>
                 </div>
               `
             });
           } catch (emailErr) {
-            console.error('Email dispatch failed:', emailErr.message);
+            console.error('Email send error:', emailErr.message);
           }
         }
 
+        const targetDialNumber = forwardNumber.split(',')[0].trim();
+
+        // Connect the caller to the contractor's dispatch line
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Connecting you to your contractor now.</Say>
-    <Dial timeout="20" callerId="${masterTelnyxNumber}">${forwardNumber}</Dial>
+    <Say voice="alice">Connecting you to our on-call team member now.</Say>
+    <Dial timeout="25" callerId="${masterTelnyxNumber || callerNumber}">${targetDialNumber}</Dial>
 </Response>`);
 
       } else if (subscriptionStatus === 'suspended' || subscriptionStatus === 'canceled') {
@@ -119,21 +121,33 @@ export default async function handler(req, res) {
       } else {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">We could not locate a contractor matching that phone number. Please try calling back and re-entering the number. Goodbye.</Say>
+    <Say voice="alice">We could not locate a contractor matching that phone number. Goodbye.</Say>
     <Hangup />
 </Response>`);
       }
     }
 
-    // STEP 1: Initial Inbound Call - Greet caller and gather keypad digits
-    const webhookCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route`;
+    // STEP 2: Caller entered keypad digits -> Ask for voice summary description
+    if (currentStep === 'record') {
+      const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route&digits=${encodeURIComponent(digitsEntered)}`;
+
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice">Thank you. Please summarize your emergency situation after the beep, and press 7 when you are finished.</Say>
+    <Record action="${recordCallbackUrl}" method="POST" maxLength="45" finishOnKey="7#" playBeep="true" />
+    <Say voice="alice">Connecting your call now.</Say>
+</Response>`);
+    }
+
+    // STEP 1: Initial Greeting & Keypad Entry
+    const gatherCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=record`;
 
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather action="${webhookCallbackUrl}" method="POST" numDigits="10" timeout="10">
-        <Say voice="alice">Thank you for calling emergency dispatch. Please enter your contractor's 10-digit phone number on your keypad now.</Say>
+    <Gather action="${gatherCallbackUrl}" method="POST" numDigits="10" timeout="8">
+        <Say voice="alice">Thank you for using Heartland Dispatch emergency service. Our team will be with you shortly. Please enter your contractor's 10-digit phone number on your keypad now.</Say>
     </Gather>
-    <Say voice="alice">We did not receive any input. Goodbye.</Say>
+    <Say voice="alice">We did not receive any keypad input. Goodbye.</Say>
     <Hangup />
 </Response>`);
 
