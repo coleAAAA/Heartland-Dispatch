@@ -36,8 +36,8 @@ export default async function handler(req, res) {
       let clientName = "Contractor";
 
       try {
-        // Grab the most recent lead from Supabase to guarantee a successful test match
-        const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone&order=id.desc&limit=1`;
+        // Grab the most recent lead from Supabase using created_at instead of id
+        const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone&order=created_at.desc&limit=1`;
         
         const dbResponse = await fetch(queryUrl, {
           method: 'GET',
