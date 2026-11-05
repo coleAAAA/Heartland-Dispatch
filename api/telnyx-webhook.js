@@ -31,12 +31,13 @@ export default async function handler(req, res) {
 
     // STEP 3: Voice summary recorded -> Send Resend Email -> Dial Contractor Line
     if (currentStep === 'route') {
-      let cleanDigits = digitsEntered.replace(/\D/g, '');
-      if (cleanDigits.length === 10) {
-        cleanDigits = `+1${cleanDigits}`;
-      } else if (cleanDigits.length > 0 && !cleanDigits.startsWith('+')) {
-        cleanDigits = `+${cleanDigits}`;
+      // Robust Phone Formatting: Extract raw digits and build E.164 (+1) format
+      let digitsOnly = digitsEntered.replace(/\D/g, '');
+      if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
+        digitsOnly = digitsOnly.substring(1);
       }
+      
+      const formattedE164 = digitsOnly.length === 10 ? `+1${digitsOnly}` : '';
 
       let forwardNumber = null;
       let subscriptionStatus = null;
@@ -45,8 +46,10 @@ export default async function handler(req, res) {
 
       try {
         let queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone`;
-        if (cleanDigits) {
-          queryUrl += `&contractor_phone=eq.${encodeURIComponent(cleanDigits)}`;
+        
+        if (formattedE164) {
+          // Query matching contractor_phone with or without +1
+          queryUrl += `&or=(contractor_phone.eq.${encodeURIComponent(formattedE164)},contractor_phone.eq.${encodeURIComponent(digitsOnly)})`;
         } else {
           queryUrl += `&order=id.desc&limit=1`;
         }
@@ -75,7 +78,7 @@ export default async function handler(req, res) {
 
       if (forwardNumber && (subscriptionStatus === 'active' || subscriptionStatus === 'pending_trial')) {
         
-        // Trigger automated email via Resend to contractor's email from index.html
+        // Trigger automated email via Resend
         if (contractorEmail) {
           try {
             await resend.emails.send({
@@ -105,7 +108,6 @@ export default async function handler(req, res) {
 
         const targetDialNumber = forwardNumber.split(',')[0].trim();
 
-        // Connect the caller to the contractor's dispatch line
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Connecting you to our on-call team member now.</Say>
@@ -127,7 +129,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // STEP 2: Caller entered keypad digits -> Ask for voice summary description
+    // STEP 2: Capture emergency voice situation description
     if (currentStep === 'record') {
       const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route&digits=${encodeURIComponent(digitsEntered)}`;
 
@@ -139,7 +141,7 @@ export default async function handler(req, res) {
 </Response>`);
     }
 
-    // STEP 1: Initial Greeting & Keypad Entry
+    // STEP 1: Initial Inbound Call - Gather keypad input
     const gatherCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=record`;
 
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
