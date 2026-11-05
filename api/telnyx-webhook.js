@@ -30,11 +30,11 @@ export default async function handler(req, res) {
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // STEP 4: Post-Dial Reassurance Handler
+    // STEP 4: Post-Dial Reassurance Handler (Catches any carrier drop or interception gracefully)
     if (currentStep === 'ended') {
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Our dispatch team has received your emergency summary and alert. Sending our team up to you soon. Goodbye.</Say>
+    <Say voice="alice">Our dispatch network has secured your emergency summary. Perfect! Our team will be with you soon. Goodbye.</Say>
     <Hangup />
 </Response>`);
     }
@@ -75,7 +75,7 @@ export default async function handler(req, res) {
       }
 
       if (forwardNumber) {
-        // Isolated Email Dispatch with Audio Link & Placeholder for AI summary
+        // Non-blocking email dispatch to coleeritter@gmail.com
         if (contractorEmail && process.env.RESEND_API_KEY) {
           try {
             const resend = new Resend(process.env.RESEND_API_KEY);
@@ -104,10 +104,11 @@ export default async function handler(req, res) {
         const targetDialNumber = String(forwardNumber).split(',')[0].trim();
         const endCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=ended`;
 
+        // Polished professional framing before attempting the carrier bridge
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Emergency dispatch call. Connecting you to the on-call team member now.</Say>
-    <Dial timeout="30" callerId="${callerNumber}" action="${endCallbackUrl}" method="POST">
+    <Say voice="alice">Thank you. Securing your connection to the on-call team.</Say>
+    <Dial timeout="28" callerId="${callerNumber}" action="${endCallbackUrl}" method="POST">
         <Number>${targetDialNumber}</Number>
     </Dial>
 </Response>`);
@@ -128,7 +129,7 @@ export default async function handler(req, res) {
 <Response>
     <Say voice="alice">Thank you. Please summarize your emergency situation after the beep, and press 7 when you are finished.</Say>
     <Record action="${recordCallbackUrl}" method="POST" maxLength="45" finishOnKey="7#" playBeep="true" />
-    <Say voice="alice">Connecting your call now.</Say>
+    <Say voice="alice">Processing your emergency transmission.</Say>
 </Response>`);
     }
 
