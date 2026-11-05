@@ -122,7 +122,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // STEP 2: Record prompt
+    // STEP 2: Record prompt (Explicitly ensure step=route is maintained in action URL)
     if (currentStep === 'record' || body.Digits || body.digits) {
       const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route`;
 
