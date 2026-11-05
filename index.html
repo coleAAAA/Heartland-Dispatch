@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Heartland Dispatch | Automated Missed-Call Text-Back</title>
+  <title>Heartland Dispatch | Automated Missed-Call Voice Routing</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Google Fonts: Inter -->
@@ -48,7 +48,7 @@
         Turn missed phone calls into $1,000+ booked jobs. Automatically.
       </h2>
       <p class="text-lg md:text-xl text-gray-600 mb-8 font-normal leading-relaxed">
-        When an emergency call goes unanswered, Heartland Dispatch instantly texts the customer back on your local business line before they call your competitor. <strong>Capturing just one extra job per month pays for itself 4x over.</strong>
+        When an emergency call goes unanswered, Heartland Dispatch answers instantly, records the customer's description, dispatches your on-call team, and emails you a high-accuracy AI summary. <strong>Capturing just one extra job per month pays for itself 4x over.</strong>
       </p>
       
       <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 mb-16">
@@ -63,8 +63,8 @@
       <!-- Quick Metrics Bar -->
       <div class="grid grid-cols-2 md:grid-cols-3 gap-6 pt-8 border-t border-gray-200 text-left">
         <div>
-          <p class="text-2xl md:text-3xl font-bold">&lt; 5s</p>
-          <p class="text-xs text-gray-500 uppercase tracking-wider mt-1">Instant Text Response</p>
+          <p class="text-2xl md:text-3xl font-bold">24/7</p>
+          <p class="text-xs text-gray-500 uppercase tracking-wider mt-1">Instant Voice Response</p>
         </div>
         <div>
           <p class="text-2xl md:text-3xl font-bold">$250<span class="text-sm font-normal text-gray-500">/mo</span></p>
@@ -88,7 +88,7 @@
         <!-- Phone Simulator UI -->
         <div class="border border-black p-6 bg-gray-50">
           <div class="flex justify-between items-center border-b border-gray-200 pb-3 mb-4">
-            <span class="text-xs font-mono text-gray-500">CUSTOMER PHONE SCREEN</span>
+            <span class="text-xs font-mono text-gray-500">AUTOMATED VOICE ROUTER</span>
             <span class="inline-block w-2 h-2 rounded-full bg-black"></span>
           </div>
           
@@ -98,10 +98,10 @@
               Status: Unanswered / Busy
             </div>
             <div id="autoReply" class="bg-black text-white p-3 rounded-md text-xs max-w-[85%] self-end hidden">
-              Hey, this is Heartland Dispatch! Saw we missed your call. What HVAC emergency can we help you with right now?
+              [Voice Automation]: "Thank you for calling. Please describe your emergency after the beep..."
             </div>
             <div id="customerReply" class="bg-gray-200 text-black p-3 rounded-md text-xs max-w-[85%] self-start hidden">
-              My AC unit just stopped cooling and it's making a loud clicking sound. Can someone come by today?
+              [AI Summary Email]: "AC compressor completely dead, water leaking in basement. Dispatched to team."
             </div>
           </div>
 
@@ -114,15 +114,15 @@
         <div class="space-y-6 text-sm leading-relaxed text-gray-700">
           <div class="p-4 border-l-2 border-black bg-white">
             <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">1. Voice Call Forwarding Triggers</h5>
-            <p>When you're out on a job or after-hours, your unanswered shop call instantly routes to our automated line.</p>
+            <p>When you're out on a job site or after-hours, your unanswered shop calls automatically route to our automated line.</p>
           </div>
           <div class="p-4 border-l-2 border-black bg-white">
-            <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">2. Instant Automated Text-Back</h5>
-            <p>Heartland Dispatch instantly texts your prospective client back in under 5 seconds to keep them from dialing a competitor.</p>
+            <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">2. Voice Prompt & Emergency Capture</h5>
+            <p>The caller is greeted immediately and prompted to describe their situation clearly after the beep.</p>
           </div>
           <div class="p-4 border-l-2 border-black bg-white">
-            <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">3. Team Dispatch & Email Summary</h5>
-            <p>Details and requests are immediately routed straight to your team's mobile devices alongside a clean summary email.</p>
+            <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">3. AI Transcription & Email Summary</h5>
+            <p>Our AI transcribes the emergency with high accuracy and instantly emails you a clean summary so you know what job you're walking into.</p>
           </div>
         </div>
       </div>
@@ -133,7 +133,7 @@
       <div class="max-w-xl mx-auto border border-black p-8 text-center bg-white">
         <h3 class="text-xs font-mono uppercase tracking-widest text-gray-500 mb-2">Flat Pricing. Massive ROI. No Contracts.</h3>
         <p class="text-4xl font-extrabold my-4">$250 <span class="text-base font-normal text-gray-500">/ month</span></p>
-        <p class="text-sm text-gray-600 mb-2">Includes unlimited text-backs, dedicated local phone number setup, and 24/7 automated emergency routing.</p>
+        <p class="text-sm text-gray-600 mb-2">Includes unlimited voice dispatch routing, dedicated line setup, and AI-powered emergency email summaries.</p>
         <p class="text-xs font-semibold text-black uppercase tracking-wide mb-6">💡 One saved $1,000 repair job pays for 4 months of service.</p>
         <button onclick="openModal()" class="w-full bg-black text-white py-4 text-xs font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-colors">
           Start 7-Day Free Trial
@@ -156,14 +156,14 @@
     </div>
   </footer>
 
-  <!-- Simple Prototype Modal -->
+  <!-- Modal with Multi-Number Tag Input -->
   <div id="trialModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 hidden z-50">
     <div class="bg-white border border-black max-w-md w-full p-6 relative">
       <button onclick="closeModal()" class="absolute top-4 right-4 text-xs font-mono hover:underline">
         [CLOSE]
       </button>
       <h3 class="text-lg font-bold uppercase tracking-tight mb-2">Start Your 7-Day Trial</h3>
-      <p class="text-xs text-gray-600 mb-6">Enter your business details below to activate your local phone line and proceed directly to secure checkout.</p>
+      <p class="text-xs text-gray-600 mb-6">Enter your business details below to activate your automated dispatch line and proceed to secure checkout.</p>
       
       <form onsubmit="handleFormSubmit(event)" class="space-y-4">
         <div>
@@ -174,11 +174,19 @@
           <label class="block text-xs font-mono uppercase mb-1">Owner Email</label>
           <input type="email" id="ownerEmail" placeholder="owner@company.com" required class="w-full border border-gray-300 p-2 text-sm focus:outline-none focus:border-black">
         </div>
+        
+        <!-- Multi-Number Tag Field -->
         <div>
-          <label class="block text-xs font-mono uppercase mb-1">Phone Area Code Preferred</label>
-          <input type="text" id="areaCode" placeholder="e.g., 615" required class="w-full border border-gray-300 p-2 text-sm focus:outline-none focus:border-black">
+          <label class="block text-xs font-mono uppercase mb-1">10-Digit Dispatch Phone Numbers</label>
+          <div id="tagContainer" class="border border-gray-300 p-2 text-sm focus-within:border-black flex flex-wrap gap-1.5 min-h-[42px] items-center cursor-text" onclick="document.getElementById('phoneInput').focus()">
+            <input type="text" id="phoneInput" placeholder="Type 10-digit number and hit Enter or Space..." class="flex-1 min-w-[180px] text-sm focus:outline-none bg-transparent">
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1.5 leading-tight">
+            Press <strong>Enter</strong>, <strong>Space</strong>, or <strong>Comma</strong> to add each 10-digit number. Need to rotate staff later due to turnover? Simply email us anytime to update your list instantly.
+          </p>
         </div>
-        <button type="submit" class="w-full bg-black text-white py-3 text-xs font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-colors">
+
+        <button type="submit" class="w-full bg-black text-white py-3 text-xs font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-colors mt-2">
           Proceed to Stripe Checkout
         </button>
       </form>
@@ -195,11 +203,68 @@
       document.getElementById('trialModal').classList.add('hidden');
     }
 
+    // Phone Tag Input Handling
+    const tagContainer = document.getElementById('tagContainer');
+    const phoneInput = document.getElementById('phoneInput');
+    let phoneNumbers = [];
+
+    phoneInput.addEventListener('keydown', function(e) {
+      if (['Enter', ' ', ','].includes(e.key)) {
+        e.preventDefault();
+        addTag(phoneInput.value.trim());
+      } else if (e.key === 'Backspace' && phoneInput.value === '' && phoneNumbers.length > 0) {
+        removeTag(phoneNumbers.length - 1);
+      }
+    });
+
+    phoneInput.addEventListener('blur', function() {
+      if (phoneInput.value.trim() !== '') {
+        addTag(phoneInput.value.trim());
+      }
+    });
+
+    function addTag(val) {
+      const cleanVal = val.replace(/,/g, '').trim();
+      if (cleanVal && !phoneNumbers.includes(cleanVal)) {
+        phoneNumbers.push(cleanVal);
+        renderTags();
+        phoneInput.value = '';
+      }
+    }
+
+    function removeTag(index) {
+      phoneNumbers.splice(index, 1);
+      renderTags();
+    }
+
+    function renderTags() {
+      const existingChips = tagContainer.querySelectorAll('.tag-chip');
+      existingChips.forEach(chip => chip.remove());
+
+      phoneNumbers.forEach((num, index) => {
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip bg-black text-white text-xs px-2 py-1 flex items-center gap-1.5 font-mono';
+        chip.innerHTML = `
+          <span>${num}</span>
+          <button type="button" onclick="event.stopPropagation(); removeTag(${index})" class="hover:text-gray-300 font-bold ml-0.5">&times;</button>
+        `;
+        tagContainer.insertBefore(chip, phoneInput);
+      });
+    }
+
     // Redirect to Stripe Checkout Link
     function handleFormSubmit(event) {
       event.preventDefault();
+
+      if (phoneNumbers.length === 0 && phoneInput.value.trim() !== '') {
+        addTag(phoneInput.value.trim());
+      }
+
+      if (phoneNumbers.length === 0) {
+        alert('Please enter at least one 10-digit dispatch phone number.');
+        return;
+      }
       
-      // Integrated Live Stripe Payment Link
       const stripeCheckoutUrl = "https://buy.stripe.com/14AfZ94a49dg9bkcmA0sU00";
       
       const msg = document.getElementById('modalMsg');
@@ -224,7 +289,7 @@
 
       setTimeout(() => {
         autoReply.classList.remove('hidden');
-        btn.innerText = 'WAITING FOR CUSTOMER TEXT...';
+        btn.innerText = 'RECORDING MESSAGE AFTER BEEP...';
       }, 1200);
 
       setTimeout(() => {
