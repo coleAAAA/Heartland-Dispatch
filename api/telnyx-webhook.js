@@ -31,7 +31,7 @@ export default async function handler(req, res) {
     const currentStep = req.query.step || body.step || '';
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
 
-    res.setHeader('Content-Type', 'xml');
+    res.setHeader('Content-Type', 'text/xml');
 
     // STEP 3: Route call, query Supabase using keypad digits, trigger alerts, and confirm
     const isRouteStep = currentStep === 'route' || Boolean(recordingUrl) || body.CallStatus === 'completed' || (body.RecordingSid);
@@ -42,11 +42,9 @@ export default async function handler(req, res) {
       let clientName = "Contractor";
 
       try {
-        // Clean the digits down to just numbers for accurate database matching
         const cleanDigits = String(capturedDigits).replace(/\D/g, '');
         console.log("Querying Supabase for contractor matching keypad digits:", cleanDigits);
 
-        // Query Supabase filtering by the contractor_phone matching the keypad input
         const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?contractor_phone=eq.${cleanDigits}&select=contractor_phone,forward_number,email,client_name&limit=1`;
         
         const dbResponse = await fetch(queryUrl, {
@@ -75,7 +73,6 @@ export default async function handler(req, res) {
         console.error('DB Error:', dbErr);
       }
 
-      // Fallback if Supabase row isn't found
       const targetForwardNumber = forwardNumber || capturedDigits || "+15625089424";
       const targetEmail = contractorEmail || "coleeritter@gmail.com";
 
@@ -170,7 +167,7 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('CRITICAL TOP-LEVEL ERROR:', error);
-    res.setHeader('Content-Type', 'xml');
+    res.setHeader('Content-Type', 'text/xml');
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">An error occurred while processing your call. Please try again later.</Say>
