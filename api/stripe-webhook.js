@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   }
 
   const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
-  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY;
 
   const sig = req.headers['stripe-signature'];
   let event;
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
   try {
     const rawBody = await buffer(req);
     
-    // Securely verify using your exact Vercel environment variable name
+    // Securely verify using your exact Vercel webhook secret environment variable name
     event = stripe.webhooks.constructEvent(
       rawBody, 
       sig, 
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
       const stripeSubscriptionId = session.subscription;
 
       if (contractorPhone) {
-        // Upsert contractor into Supabase with active status using the service role key (bypasses RLS safely)
+        // Upsert contractor into Supabase with active status using your custom service role key name
         await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients`, {
           method: 'POST',
           headers: {
