@@ -1,5 +1,8 @@
+// --- FULLY SELF-CONTAINED TELNYX + SUPABASE WEBHOOK HANDLER ---
+
 export default async function handler(req, res) {
   try {
+    // 1. Parse incoming request body
     let body = req.body || {};
     if (typeof body === 'string') {
       try { 
@@ -11,69 +14,76 @@ export default async function handler(req, res) {
       }
     }
 
-    const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-    const eventType = body.data?.event_type;
+    // 2. Hardcoded Supabase Credentials
+    const SUPABASE_URL = "https://YOUR_SUPABASE_PROJECT_ID.supabase.co";
+    const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
 
-    // --- CASE 1: INBOUND TEXT MESSAGE RECEIVED ---
-    if (eventType === 'message.received') {
-      const sender = body.data?.payload?.from?.phone_number;
-      const recipient = body.data?.payload?.to?.[0]?.phone_number || body.data?.payload?.to;
+    // 3. Extract call details from Telnyx webhook payload
+    const myTelnyxNumber = body.To || body.to || body.data?.payload?.to;
+    const customerPhone = body.From || body.from || body.data?.payload?.from;
 
-      console.log(`Inbound SMS received from ${sender} to ${recipient}`);
+    console.log(`Inbound Call from ${customerPhone} to Telnyx line ${myTelnyxNumber}`);
 
-      if (sender && recipient) {
-        // Send automated text reply to the person who texted you
-        await fetch('https://api.telnyx.com/v2/messages', {
-          method: 'POST',
+    let forwardNumber = null;
+
+    // 4. Direct REST API Query to Supabase (No npm package required)
+    if (myTelnyxNumber) {
+      try {
+        const queryUrl = `${SUPABASE_URL}/rest/v1/clients?telnyx_number=eq.${encodeURIComponent(myTelnyxNumber)}&select=forward_number`;
+        
+        const dbResponse = await fetch(queryUrl, {
+          method: 'GET',
           headers: {
-            'Authorization': `Bearer ${TELNYX_API_KEY}`,
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
             'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            from: recipient,
-            to: sender,
-            text: "Thanks for reaching out to Heartland Dispatch! We received your message and will be with you shortly. Feel free to send details or photos of your HVAC/plumbing issue."
-          })
+          }
         });
+
+        if (dbResponse.ok) {
+          const rows = await dbResponse.json();
+          if (rows && rows.length > 0 && rows[0].forward_number) {
+            forwardNumber = rows[0].forward_number;
+            console.log(`Found matching forward number: ${forwardNumber}`);
+          }
+        } else {
+          console.error('Supabase REST query failed:', dbResponse.statusText);
+        }
+      } catch (dbErr) {
+        console.error('Database fetch error:', dbErr.message);
       }
-      return res.status(200).json({ status: 'ok' });
     }
 
-    // --- CASE 2: INBOUND CALL RECEIVED ---
+    // 5. Generate TeXML Voice Response
     res.setHeader('Content-Type', 'text/xml');
-    const audioResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
+
+    let audioResponseXml = '';
+
+    if (forwardNumber) {
+      // Direct Call Forwarding to On-Call Technician / Dispatch Line
+      audioResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">We will be with you shortly.</Say>
+    <Say voice="alice">Thank you for reaching out! Connecting you to our emergency team now.</Say>
+    <Dial timeout="20">${forwardNumber}</Dial>
+</Response>`;
+    } else {
+      // Standard Fallback Greeting if line is not bound in Supabase
+      audioResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice">Thank you for reaching out to us! We will have a team member with you shortly to address the problem.</Say>
     <Hangup />
 </Response>`;
-
-    const customerPhone = body.From || body.from || body.data?.payload?.from;
-    const myTelnyxNumber = body.To || body.to || body.data?.payload?.to;
-
-    if (customerPhone && myTelnyxNumber) {
-      console.log(`Inbound Call -> Sending missed-call SMS to ${customerPhone} from ${myTelnyxNumber}`);
-      
-      const smsRes = await fetch('https://api.telnyx.com/v2/messages', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${TELNYX_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: myTelnyxNumber,
-          to: customerPhone,
-          text: "Hey, this is Heartland Dispatch! Saw we missed your call. What HVAC/plumbing issue can we help you with right now? Text me details or photos here."
-        })
-      });
-
-      const smsData = await smsRes.json();
-      console.log('Telnyx SMS Response:', JSON.stringify(smsData));
     }
 
     return res.status(200).send(audioResponseXml);
+
   } catch (error) {
     console.error('Webhook Error:', error.message);
     res.setHeader('Content-Type', 'text/xml');
-    return res.status(200).send(`<Response><Say voice="alice">We will be with you shortly.</Say><Hangup /></Response>`);
+    return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice">Thank you for reaching out to us! We will have a team member with you shortly to address the problem.</Say>
+    <Hangup />
+</Response>`);
   }
 }
