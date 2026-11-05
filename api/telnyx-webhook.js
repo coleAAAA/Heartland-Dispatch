@@ -45,11 +45,12 @@ export default async function handler(req, res) {
 
     res.setHeader('Content-Type', 'text/xml');
 
-    if (forwardNumber) {
+    if (forwardNumber && myTelnyxNumber) {
+      // Passing callerId prevents carriers from flagging the outbound leg as unverified
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Thank you for reaching out! Connecting you to our team now.</Say>
-    <Dial timeout="20">${forwardNumber}</Dial>
+    <Dial timeout="20" callerId="${myTelnyxNumber}">${forwardNumber}</Dial>
 </Response>`);
     } else {
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
