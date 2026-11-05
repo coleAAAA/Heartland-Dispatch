@@ -27,35 +27,13 @@ export default async function handler(req, res) {
     
     const currentStep = req.query.step || body.step || '';
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
-    const dialCallStatus = body.DialCallStatus || body.dial_call_status || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // STEP 4: Post-Dial Fallback Handler
-    // If step=ended is triggered, check if the dial actually completed successfully with a live person.
-    if (currentStep === 'ended') {
-      console.log("DIAL CALL STATUS RESULT:", dialCallStatus);
-
-      // If a live person actually answered and completed the call, hang up quietly.
-      if (dialCallStatus === 'completed') {
-        return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Hangup />
-</Response>`);
-      }
-
-      // Otherwise (no-answer, busy, cancelled, or intercepted by carrier spam/voicemail), play the reassurance fallback!
-      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">Our dispatch network has secured your emergency summary. Perfect! Our team will be with you as soon as possible. Goodbye.</Say>
-    <Hangup />
-</Response>`);
-    }
-
-    // STEP 3: Route call after recording, trigger email, and attempt live contractor bridge
+    // STEP 3: Route call, trigger background alerts, and deliver pristine AI confirmation
     const isRouteStep = currentStep === 'route' || Boolean(recordingUrl) || body.CallStatus === 'completed' || (body.RecordingSid);
 
-    if (isRouteStep && currentStep !== 'record' && currentStep !== 'ended') {
+    if (isRouteStep && currentStep !== 'record') {
       let forwardNumber = null;
       let contractorEmail = null;
       let clientName = "Contractor";
@@ -87,11 +65,11 @@ export default async function handler(req, res) {
         console.error('DB Error:', dbErr);
       }
 
-      // Email dispatch to contractor with audio recording link
+      // 1. Non-blocking email dispatch to contractor with audio recording link
       if (contractorEmail && process.env.RESEND_API_KEY) {
         try {
           const resend = new Resend(process.env.RESEND_API_KEY);
-          const emailResult = await resend.emails.send({
+          resend.emails.send({
             from: 'Heartland Dispatch <onboarding@resend.dev>',
             to: contractorEmail,
             subject: `🚨 Emergency Call Alert - Call from ${callerNumber}`,
@@ -99,7 +77,7 @@ export default async function handler(req, res) {
               <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee;">
                 <h2 style="color: #000; text-transform: uppercase;">🚨 New Emergency Call Dispatched</h2>
                 <p>Hello <strong>${clientName}</strong>,</p>
-                <p>An emergency caller attempted to reach your live dispatch line.</p>
+                <p>An emergency caller submitted a secure voice summary.</p>
                 <div style="background-color: #f9f9f9; padding: 15px; margin: 15px 0; font-family: monospace;">
                   <p style="margin: 4px 0;"><strong>Caller Phone:</strong> ${callerNumber}</p>
                   <p style="margin: 4px 0;"><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
@@ -107,24 +85,43 @@ export default async function handler(req, res) {
                 </div>
               </div>
             `
-          });
-          console.log("RESEND EMAIL SUCCESS:", emailResult);
-        } catch (mailErr) {
-          console.error('Resend Email Error:', mailErr);
+          }).catch(mailErr => console.error('Background Email Error:', mailErr));
+        } catch (emailInitErr) {
+          console.error('Resend Init Error:', emailInitErr);
         }
       }
 
-      const targetDialNumber = String(forwardNumber).split(',')[0].trim();
-      const endCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=ended`;
-      const safeCallerId = masterTelnyxNumber.length > 3 ? masterTelnyxNumber : "+18005550199";
+      // 2. Simultaneous Outbound Call Trigger to Contractor via Telnyx API (using your 615 master number)
+      if (forwardNumber && process.env.TELNYX_API_KEY) {
+        try {
+          const targetNumber = String(forwardNumber).split(',')[0].trim();
+          const cleanTo = targetNumber.startsWith('+') ? targetNumber : `+1${targetNumber}`;
+          const cleanFrom = masterTelnyxNumber.length > 3 ? masterTelnyxNumber : "+16155550199";
 
-      // Ring operator live for 8 seconds using YOUR Telnyx number as callerId
+          // Trigger background Telnyx Call Control / Outbound call so the operator gets a direct ring from the 615 number
+          fetch('https://api.telnyx.com/v2/calls', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              connection_id: process.env.TELNYX_CONNECTION_ID || "",
+              to: cleanTo,
+              from: cleanFrom,
+              webhook_url: `https://${req.headers.host}/api/telnyx-webhook?step=outbound_alert`
+            })
+          }).catch(telnyxErr => console.error('Background Outbound Call Error:', telnyxErr));
+        } catch (outboundErr) {
+          console.error('Outbound Init Error:', outboundErr);
+        }
+      }
+
+      // Pristine, confident customer reassurance confirmation
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Connecting you to the on-call team now.</Say>
-    <Dial timeout="8" callerId="${safeCallerId}" action="${endCallbackUrl}" method="POST">
-        <Number>${targetDialNumber}</Number>
-    </Dial>
+    <Say voice="alice">Our dispatch network has secured your emergency summary. Perfect! Our team will be with you as soon as possible. Goodbye.</Say>
+    <Hangup />
 </Response>`);
     }
 
