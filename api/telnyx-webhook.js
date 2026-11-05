@@ -30,10 +30,19 @@ export default async function handler(req, res) {
 
     res.setHeader('Content-Type', 'text/xml');
 
+    // STEP 4: Post-Dial Reassurance Handler
+    if (currentStep === 'ended') {
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice">Our dispatch team has received your emergency summary and alert. Sending our team up to you soon. Goodbye.</Say>
+    <Hangup />
+</Response>`);
+    }
+
     // STEP 3: Route call after recording
     const isRouteStep = currentStep === 'route' || Boolean(recordingUrl) || body.CallStatus === 'completed' || (body.RecordingSid);
 
-    if (isRouteStep && currentStep !== 'record') {
+    if (isRouteStep && currentStep !== 'record' && currentStep !== 'ended') {
       let forwardNumber = null;
       let contractorEmail = null;
       let clientName = "Contractor";
@@ -66,11 +75,11 @@ export default async function handler(req, res) {
       }
 
       if (forwardNumber) {
-        // Isolated Email Dispatch
+        // Isolated Email Dispatch with Audio Link & Placeholder for AI summary
         if (contractorEmail && process.env.RESEND_API_KEY) {
           try {
             const resend = new Resend(process.env.RESEND_API_KEY);
-            const emailRes = await resend.emails.send({
+            resend.emails.send({
               from: 'Heartland Dispatch <onboarding@resend.dev>',
               to: contractorEmail,
               subject: `🚨 Emergency Call Alert - Call from ${callerNumber}`,
@@ -78,7 +87,7 @@ export default async function handler(req, res) {
                 <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee;">
                   <h2 style="color: #000; text-transform: uppercase;">🚨 New Emergency Call Dispatched</h2>
                   <p>Hello <strong>${clientName}</strong>,</p>
-                  <p>An emergency caller was just connected to your dispatch line.</p>
+                  <p>An emergency caller attempted to reach your dispatch line.</p>
                   <div style="background-color: #f9f9f9; padding: 15px; margin: 15px 0; font-family: monospace;">
                     <p style="margin: 4px 0;"><strong>Caller Phone:</strong> ${callerNumber}</p>
                     <p style="margin: 4px 0;"><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
@@ -86,20 +95,19 @@ export default async function handler(req, res) {
                   </div>
                 </div>
               `
-            });
-            console.log("RESEND SUCCESS:", emailRes);
-          } catch (emailErr) {
-            console.error('RESEND CRITICAL ERROR:', emailErr);
+            }).catch(mailErr => console.error('Background Email Error:', mailErr));
+          } catch (emailInitErr) {
+            console.error('Resend Init Error:', emailInitErr);
           }
         }
 
         const targetDialNumber = String(forwardNumber).split(',')[0].trim();
+        const endCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=ended`;
 
-        // Passed explicit callerId and answering audio stream to bypass carrier silent-drop spam filters
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Emergency dispatch call. Connecting you now.</Say>
-    <Dial timeout="35" callerId="${callerNumber}">
+    <Say voice="alice">Emergency dispatch call. Connecting you to the on-call team member now.</Say>
+    <Dial timeout="30" callerId="${callerNumber}" action="${endCallbackUrl}" method="POST">
         <Number>${targetDialNumber}</Number>
     </Dial>
 </Response>`);
