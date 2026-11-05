@@ -4,6 +4,7 @@ const resend = new Resend(process.env.RESEND_API_KEY || '');
 
 export default async function handler(req, res) {
   try {
+    // Robust Body & Query Parsing for TeXML / Telnyx Form-Urlencoded payloads
     let body = req.body || {};
     if (typeof body === 'string') {
       try { 
@@ -13,6 +14,21 @@ export default async function handler(req, res) {
           body = Object.fromEntries(new URLSearchParams(body).entries()); 
         } catch (err) {}
       }
+    } else if (Buffer.isBuffer(body)) {
+      try {
+        body = Object.fromEntries(new URLSearchParams(body.toString()).entries());
+      } catch (e) {
+        body = {};
+      }
+    } else if (typeof body === 'object' && Object.keys(body).length === 0 && req.method === 'POST') {
+      // Fallback if Vercel passes raw urlencoded body as text/stream chunks
+      try {
+        let rawBody = '';
+        for await (const chunk of req) {
+          rawBody += chunk;
+        }
+        body = Object.fromEntries(new URLSearchParams(rawBody).entries());
+      } catch (err) {}
     }
 
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
@@ -23,6 +39,8 @@ export default async function handler(req, res) {
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
     
     const currentStep = req.query.step || '';
+    
+    // Capture digits from query string (if passed forward) or Telnyx form body (Digits / digits)
     const digitsEntered = req.query.digits || body.Digits || body.digits || body.data?.payload?.digits || "";
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || "";
 
@@ -102,7 +120,6 @@ export default async function handler(req, res) {
           }
         }
 
-        // Defensive string splitting to prevent null reference crashes
         const safeForward = String(forwardNumber || '').trim();
         const targetDialNumber = safeForward.includes(',') ? safeForward.split(',')[0].trim() : safeForward;
 
@@ -121,7 +138,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // STEP 2: Capture emergency voice situation description
+    // STEP 2: Capture emergency voice situation description (Pass digits forward via query param)
     if (currentStep === 'record') {
       const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route&digits=${encodeURIComponent(digitsEntered)}`;
 
