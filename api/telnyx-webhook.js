@@ -1,6 +1,6 @@
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY || '');
 
 export default async function handler(req, res) {
   try {
@@ -18,7 +18,6 @@ export default async function handler(req, res) {
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
     
-    // Extract call parameters from Telnyx payload
     const rawTo = body.To || body.to || body.data?.payload?.to || "";
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
@@ -31,8 +30,7 @@ export default async function handler(req, res) {
 
     // STEP 3: Voice summary recorded -> Send Resend Email -> Dial Contractor Line
     if (currentStep === 'route') {
-      // Robust Phone Formatting: Extract raw digits and build E.164 (+1) format
-      let digitsOnly = digitsEntered.replace(/\D/g, '');
+      let digitsOnly = String(digitsEntered).replace(/\D/g, '');
       if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
         digitsOnly = digitsOnly.substring(1);
       }
@@ -40,15 +38,14 @@ export default async function handler(req, res) {
       const formattedE164 = digitsOnly.length === 10 ? `+1${digitsOnly}` : '';
 
       let forwardNumber = null;
-      let subscriptionStatus = null;
+      let subscriptionStatus = 'pending_trial';
       let contractorEmail = null;
-      let clientName = null;
+      let clientName = "Contractor";
 
       try {
         let queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone`;
         
         if (formattedE164) {
-          // Query matching contractor_phone with or without +1
           queryUrl += `&or=(contractor_phone.eq.${encodeURIComponent(formattedE164)},contractor_phone.eq.${encodeURIComponent(digitsOnly)})`;
         } else {
           queryUrl += `&order=id.desc&limit=1`;
@@ -63,7 +60,7 @@ export default async function handler(req, res) {
           }
         });
 
-        if (dbResponse.ok) {
+        if (dbResponse && dbResponse.ok) {
           const rows = await dbResponse.json();
           if (rows && rows.length > 0) {
             forwardNumber = rows[0].forward_number || rows[0].contractor_phone;
@@ -73,12 +70,11 @@ export default async function handler(req, res) {
           }
         }
       } catch (dbErr) {
-        console.error('Database query error:', dbErr.message);
+        console.error('Database query exception:', dbErr);
       }
 
       if (forwardNumber && (subscriptionStatus === 'active' || subscriptionStatus === 'pending_trial')) {
         
-        // Trigger automated email via Resend
         if (contractorEmail) {
           try {
             await resend.emails.send({
@@ -102,11 +98,13 @@ export default async function handler(req, res) {
               `
             });
           } catch (emailErr) {
-            console.error('Email send error:', emailErr.message);
+            console.error('Resend email exception:', emailErr);
           }
         }
 
-        const targetDialNumber = forwardNumber.split(',')[0].trim();
+        // Defensive string splitting to prevent null reference crashes
+        const safeForward = String(forwardNumber || '').trim();
+        const targetDialNumber = safeForward.includes(',') ? safeForward.split(',')[0].trim() : safeForward;
 
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -114,12 +112,6 @@ export default async function handler(req, res) {
     <Dial timeout="25" callerId="${masterTelnyxNumber || callerNumber}">${targetDialNumber}</Dial>
 </Response>`);
 
-      } else if (subscriptionStatus === 'suspended' || subscriptionStatus === 'canceled') {
-        return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">We are sorry, but this contractor's dispatch service is currently inactive. Goodbye.</Say>
-    <Hangup />
-</Response>`);
       } else {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -154,6 +146,7 @@ export default async function handler(req, res) {
 </Response>`);
 
   } catch (error) {
+    console.error('CRITICAL WEBHOOK EXCEPTION:', error);
     res.setHeader('Content-Type', 'text/xml');
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
