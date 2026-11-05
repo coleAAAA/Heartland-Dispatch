@@ -31,8 +31,12 @@ export default async function handler(req, res) {
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // STEP 4: Post-Dial Fallback Handler (Triggers if live dial times out quickly or hits carrier block)
+    // STEP 4: Post-Dial Fallback Handler
+    // If step=ended is triggered, check if the dial actually completed successfully with a live person.
     if (currentStep === 'ended') {
+      console.log("DIAL CALL STATUS RESULT:", dialCallStatus);
+
+      // If a live person actually answered and completed the call, hang up quietly.
       if (dialCallStatus === 'completed') {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -40,6 +44,7 @@ export default async function handler(req, res) {
 </Response>`);
       }
 
+      // Otherwise (no-answer, busy, cancelled, or intercepted by carrier spam/voicemail), play the reassurance fallback!
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Our dispatch network has secured your emergency summary. Perfect! Our team will be with you as soon as possible. Goodbye.</Say>
@@ -113,7 +118,7 @@ export default async function handler(req, res) {
       const endCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=ended`;
       const safeCallerId = masterTelnyxNumber.length > 3 ? masterTelnyxNumber : "+18005550199";
 
-      // Ring operator live for 8 seconds using YOUR Telnyx number as callerId to bypass carrier spam filters
+      // Ring operator live for 8 seconds using YOUR Telnyx number as callerId
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Connecting you to the on-call team now.</Say>
