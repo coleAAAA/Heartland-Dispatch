@@ -132,12 +132,12 @@ export default async function handler(req, res) {
 </Response>`);
     }
 
-    // STEP 1: Gather Initial Digits
+    // STEP 1: Gather Initial Digits (Relaxed to 18 second timeout so callers don't get cut off)
     const gatherCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=record`;
 
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather action="${gatherCallbackUrl}" method="POST" numDigits="10" timeout="8">
+    <Gather action="${gatherCallbackUrl}" method="POST" numDigits="10" timeout="18">
         <Say voice="alice">Thank you for using Heartland Dispatch emergency service. Please enter your contractor's 10-digit phone number on your keypad now.</Say>
     </Gather>
     <Say voice="alice">We did not receive any keypad input. Goodbye.</Say>
