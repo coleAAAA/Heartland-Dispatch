@@ -26,25 +26,14 @@ export default async function handler(req, res) {
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
     
     const currentStep = req.query.step || body.step || '';
-    const digitsEntered = body.Digits || body.digits || req.query.digits || "";
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // STEP 4: Final bridge after contractor presses 1 to accept
-    if (currentStep === 'connect' || digitsEntered === '1') {
-      const dialTarget = req.query.to || body.to || "";
-      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">Connecting you now.</Say>
-    <Dial timeout="25" callerId="${masterTelnyxNumber || callerNumber}">${dialTarget}</Dial>
-</Response>`);
-    }
-
-    // STEP 3: Route call if we have a recording URL or step is explicitly route
+    // STEP 3: Route call after recording
     const isRouteStep = currentStep === 'route' || Boolean(recordingUrl) || body.CallStatus === 'completed' || (body.RecordingSid);
 
-    if (isRouteStep && currentStep !== 'record' && currentStep !== 'connect' && !body.Digits) {
+    if (isRouteStep && currentStep !== 'record') {
       let forwardNumber = null;
       let contractorEmail = null;
       let clientName = "Contractor";
@@ -77,10 +66,11 @@ export default async function handler(req, res) {
       }
 
       if (forwardNumber) {
+        // Isolated Email Dispatch
         if (contractorEmail && process.env.RESEND_API_KEY) {
           try {
             const resend = new Resend(process.env.RESEND_API_KEY);
-            await resend.emails.send({
+            const emailRes = await resend.emails.send({
               from: 'Heartland Dispatch <onboarding@resend.dev>',
               to: contractorEmail,
               subject: `🚨 Emergency Call Alert - Call from ${callerNumber}`,
@@ -97,21 +87,18 @@ export default async function handler(req, res) {
                 </div>
               `
             });
+            console.log("RESEND SUCCESS:", emailRes);
           } catch (emailErr) {
-            console.error('Email Error:', emailErr);
+            console.error('RESEND CRITICAL ERROR:', emailErr);
           }
         }
 
         const targetDialNumber = String(forwardNumber).split(',')[0].trim();
-        const acceptCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=connect&to=${encodeURIComponent(targetDialNumber)}`;
 
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather action="${acceptCallbackUrl}" method="POST" numDigits="1" timeout="10">
-        <Say voice="alice">You have an emergency dispatch call. Press 1 to accept.</Say>
-    </Gather>
-    <Say voice="alice">No response received. Goodbye.</Say>
-    <Hangup />
+    <Say voice="alice">Emergency dispatch call detected. Connecting you to the on-call team member now.</Say>
+    <Dial timeout="30" callerId="${masterTelnyxNumber || callerNumber}">${targetDialNumber}</Dial>
 </Response>`);
       } else {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
@@ -122,7 +109,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // STEP 2: Record prompt (Triggered after entering contractor number)
+    // STEP 2: Record prompt
     if (currentStep === 'record' || body.Digits || body.digits) {
       const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route`;
 
@@ -147,7 +134,7 @@ export default async function handler(req, res) {
 </Response>`);
 
   } catch (error) {
-    console.error('CRITICAL ERROR:', error);
+    console.error('CRITICAL TOP-LEVEL ERROR:', error);
     res.setHeader('Content-Type', 'text/xml');
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
