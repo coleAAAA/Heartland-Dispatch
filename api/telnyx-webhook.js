@@ -23,15 +23,22 @@ export default async function handler(req, res) {
     
     const rawTo = body.To || body.to || body.data?.payload?.to || "";
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
-    const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
     
     const currentStep = req.query.step || body.step || '';
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
+    const dialCallStatus = body.DialCallStatus || body.dial_call_status || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // STEP 4: Post-Dial Reassurance Handler (Catches any carrier drop or interception gracefully)
+    // STEP 4: Post-Dial Fallback Handler (Triggers if live dial times out quickly or hits carrier block)
     if (currentStep === 'ended') {
+      if (dialCallStatus === 'completed') {
+        return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Hangup />
+</Response>`);
+      }
+
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Our dispatch network has secured your emergency summary. Perfect! Our team will be with you soon. Goodbye.</Say>
@@ -74,51 +81,43 @@ export default async function handler(req, res) {
         console.error('DB Error:', dbErr);
       }
 
-      if (forwardNumber) {
-        // Non-blocking email dispatch to coleeritter@gmail.com
-        if (contractorEmail && process.env.RESEND_API_KEY) {
-          try {
-            const resend = new Resend(process.env.RESEND_API_KEY);
-            resend.emails.send({
-              from: 'Heartland Dispatch <onboarding@resend.dev>',
-              to: contractorEmail,
-              subject: `🚨 Emergency Call Alert - Call from ${callerNumber}`,
-              html: `
-                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee;">
-                  <h2 style="color: #000; text-transform: uppercase;">🚨 New Emergency Call Dispatched</h2>
-                  <p>Hello <strong>${clientName}</strong>,</p>
-                  <p>An emergency caller attempted to reach your dispatch line.</p>
-                  <div style="background-color: #f9f9f9; padding: 15px; margin: 15px 0; font-family: monospace;">
-                    <p style="margin: 4px 0;"><strong>Caller Phone:</strong> ${callerNumber}</p>
-                    <p style="margin: 4px 0;"><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
-                    ${recordingUrl ? `<p style="margin: 4px 0;"><strong>Voice Summary Audio:</strong> <a href="${recordingUrl}" target="_blank">Listen To Audio Summary</a></p>` : ''}
-                  </div>
+      // Non-blocking email dispatch to coleeritter@gmail.com with audio link
+      if (contractorEmail && process.env.RESEND_API_KEY) {
+        try {
+          const resend = new Resend(process.env.RESEND_API_KEY);
+          resend.emails.send({
+            from: 'Heartland Dispatch <onboarding@resend.dev>',
+            to: contractorEmail,
+            subject: `🚨 Emergency Call Alert - Call from ${callerNumber}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee;">
+                <h2 style="color: #000; text-transform: uppercase;">🚨 New Emergency Call Dispatched</h2>
+                <p>Hello <strong>${clientName}</strong>,</p>
+                <p>An emergency caller attempted to reach your live dispatch line.</p>
+                <div style="background-color: #f9f9f9; padding: 15px; margin: 15px 0; font-family: monospace;">
+                  <p style="margin: 4px 0;"><strong>Caller Phone:</strong> ${callerNumber}</p>
+                  <p style="margin: 4px 0;"><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
+                  ${recordingUrl ? `<p style="margin: 4px 0;"><strong>Voice Summary Audio:</strong> <a href="${recordingUrl}" target="_blank">Listen To Audio Summary</a></p>` : ''}
                 </div>
-              `
-            }).catch(mailErr => console.error('Background Email Error:', mailErr));
-          } catch (emailInitErr) {
-            console.error('Resend Init Error:', emailInitErr);
-          }
+              </div>
+            `
+          }).catch(mailErr => console.error('Background Email Error:', mailErr));
+        } catch (emailInitErr) {
+          console.error('Resend Init Error:', emailInitErr);
         }
+      }
 
-        const targetDialNumber = String(forwardNumber).split(',')[0].trim();
-        const endCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=ended`;
+      const targetDialNumber = String(forwardNumber).split(',')[0].trim();
+      const endCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=ended`;
 
-        // Polished professional framing before attempting the carrier bridge
-        return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+      // Fast 7-second ring window (~2 rings) before falling back to AI reassurance
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Thank you. Securing your connection to the on-call team.</Say>
-    <Dial timeout="28" callerId="${callerNumber}" action="${endCallbackUrl}" method="POST">
+    <Say voice="alice">Connecting you to the on-call team now.</Say>
+    <Dial timeout="7" callerId="${callerNumber}" action="${endCallbackUrl}" method="POST">
         <Number>${targetDialNumber}</Number>
     </Dial>
 </Response>`);
-      } else {
-        return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">We could not locate any contractor records in the database. Goodbye.</Say>
-    <Hangup />
-</Response>`);
-      }
     }
 
     // STEP 2: Record prompt
@@ -129,7 +128,7 @@ export default async function handler(req, res) {
 <Response>
     <Say voice="alice">Thank you. Please summarize your emergency situation after the beep, and press 7 when you are finished.</Say>
     <Record action="${recordCallbackUrl}" method="POST" maxLength="45" finishOnKey="7#" playBeep="true" />
-    <Say voice="alice">Processing your emergency transmission.</Say>
+    <Say voice="alice">Processing your transmission.</Say>
 </Response>`);
     }
 
