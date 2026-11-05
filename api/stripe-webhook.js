@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   }
 
   const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
-  const SUPABASE_ANON_KEY = "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
+  const SUPABASE_ANON_KEY = "process.env.SUPABASE_SERVICE_ROLE_KEY";
 
   try {
     const rawBody = await buffer(req);
