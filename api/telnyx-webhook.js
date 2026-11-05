@@ -26,31 +26,13 @@ export default async function handler(req, res) {
     
     const currentStep = req.query.step || body.step || '';
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
-    const dialCallStatus = body.DialCallStatus || body.dial_call_status || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // STEP 4: Post-Dial Fallback Handler (Triggers if live dial times out quickly or hits carrier block)
-    if (currentStep === 'ended') {
-      if (dialCallStatus === 'completed') {
-        return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Hangup />
-</Response>`);
-      }
-
-      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">Our dispatch network has secured your emergency summary. Perfect! Our team will be with you soon. Goodbye.</Say>
-    <Hangup />
-</Response>`);
-    }
-
-    // STEP 3: Route call after recording
+    // STEP 3: Route call, trigger email, and deliver flawless AI confirmation
     const isRouteStep = currentStep === 'route' || Boolean(recordingUrl) || body.CallStatus === 'completed' || (body.RecordingSid);
 
-    if (isRouteStep && currentStep !== 'record' && currentStep !== 'ended') {
-      let forwardNumber = null;
+    if (isRouteStep && currentStep !== 'record') {
       let contractorEmail = null;
       let clientName = "Contractor";
 
@@ -72,7 +54,6 @@ export default async function handler(req, res) {
         if (dbResponse.ok) {
           const rows = JSON.parse(responseText);
           if (rows && rows.length > 0) {
-            forwardNumber = rows[0].forward_number || rows[0].contractor_phone;
             contractorEmail = rows[0].email;
             clientName = rows[0].client_name || "Contractor";
           }
@@ -93,7 +74,7 @@ export default async function handler(req, res) {
               <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee;">
                 <h2 style="color: #000; text-transform: uppercase;">🚨 New Emergency Call Dispatched</h2>
                 <p>Hello <strong>${clientName}</strong>,</p>
-                <p>An emergency caller attempted to reach your live dispatch line.</p>
+                <p>An emergency caller submitted a secure voice summary.</p>
                 <div style="background-color: #f9f9f9; padding: 15px; margin: 15px 0; font-family: monospace;">
                   <p style="margin: 4px 0;"><strong>Caller Phone:</strong> ${callerNumber}</p>
                   <p style="margin: 4px 0;"><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
@@ -107,16 +88,11 @@ export default async function handler(req, res) {
         }
       }
 
-      const targetDialNumber = String(forwardNumber).split(',')[0].trim();
-      const endCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=ended`;
-
-      // Fast 7-second ring window (~2 rings) before falling back to AI reassurance
+      // Pristine, professional confirmation eliminating carrier password prompts forever
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Connecting you to the on-call team now.</Say>
-    <Dial timeout="7" callerId="${callerNumber}" action="${endCallbackUrl}" method="POST">
-        <Number>${targetDialNumber}</Number>
-    </Dial>
+    <Say voice="alice">Our dispatch network has secured your emergency summary. Perfect! Our team will be with you soon. Goodbye.</Say>
+    <Hangup />
 </Response>`);
     }
 
@@ -132,7 +108,7 @@ export default async function handler(req, res) {
 </Response>`);
     }
 
-    // STEP 1: Gather Initial Digits (Relaxed to 18 second timeout so callers don't get cut off)
+    // STEP 1: Gather Initial Digits (18-second relaxed timeout)
     const gatherCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=record`;
 
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
