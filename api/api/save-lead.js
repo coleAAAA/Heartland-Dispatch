@@ -1,58 +1,80 @@
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method not allowed' });
+  // Allow CORS
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
   }
 
-  const { company_name, owner_email, primary_phone, backup_phones } = req.body;
-  const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
-  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY;
-
-  if (!SUPABASE_SERVICE_ROLE_KEY) {
-    console.error('SUPABASE_SUPER_SECRET_KEY environment variable is missing.');
-    return res.status(500).json({ error: 'Server configuration error.' });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // Format primary phone into clean 10-digit / E.164 standard
-    let cleanPrimary = (primary_phone || '').replace(/\D/g, '');
-    if (cleanPrimary.length === 10) {
-      cleanPrimary = `+1${cleanPrimary}`;
-    } else if (cleanPrimary.length > 0 && !cleanPrimary.startsWith('+')) {
-      cleanPrimary = `+${cleanPrimary}`;
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) {}
     }
 
-    // Format any secondary forward numbers
-    const cleanBackup = (backup_phones || []).map(num => {
-      let clean = num.replace(/\D/g, '');
-      return clean.length === 10 ? `+1${clean}` : clean;
-    }).join(', ');
+    const { client_name, contractor_phone, forward_number, email } = body;
 
-    const response = await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients`, {
+    if (!contractor_phone || !forward_number) {
+      return res.status(400).json({ error: 'Missing required phone numbers' });
+    }
+
+    const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
+    // Use SUPABASE_SUPER_SECRET_KEY to ensure backend writes never fail due to RLS policies
+    const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
+
+    const payload = {
+      client_name: client_name || "Heartland Dispatch Client",
+      contractor_phone: String(contractor_phone).trim(),
+      forward_number: String(forward_number).trim(),
+      email: email ? String(email).trim() : null,
+      status: 'pending_trial'
+    };
+
+    console.log("Saving lead to Supabase:", payload);
+
+    const dbResponse = await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients`, {
       method: 'POST',
       headers: {
-        'apikey': SUPABASE_SERVICE_ROLE_KEY,
-        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
         'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
+        'Prefer': 'return=representation'
       },
-      body: JSON.stringify({
-        client_name: company_name,
-        email: owner_email,
-        contractor_phone: cleanPrimary,
-        forward_number: cleanBackup || cleanPrimary,
-        status: 'pending_trial'
-      })
+      body: JSON.stringify(payload)
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('Supabase Save Lead Error:', errText);
-      return res.status(500).json({ error: errText });
+    const responseText = await dbResponse.text();
+    
+    if (!dbResponse.ok) {
+      console.error('Supabase insert failed:', responseText);
+      return res.status(500).json({ error: 'Database save failed', details: responseText });
     }
 
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error('Save lead server error:', err.message);
-    return res.status(500).json({ error: err.message });
+    let insertedData = [];
+    try {
+      insertedData = JSON.parse(responseText);
+    } catch (e) {}
+
+    return res.status(200).json({ 
+      success: true, 
+      message: 'Lead saved successfully',
+      data: insertedData,
+      stripeUrl: 'https://buy.stripe.com/14AfZ94a49dg9bkcmA0sU00'
+    });
+
+  } catch (error) {
+    console.error('Critical save-lead error:', error);
+    return res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 }
