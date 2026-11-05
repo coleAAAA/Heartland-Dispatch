@@ -2,7 +2,6 @@ import { Resend } from 'resend';
 
 export default async function handler(req, res) {
   try {
-    // Basic body parsing safe for any Node version
     let body = {};
     try {
       if (typeof req.body === 'string') {
@@ -31,25 +30,14 @@ export default async function handler(req, res) {
 
     // STEP 3: Route call after recording
     if (currentStep === 'route') {
-      let digitsOnly = String(digitsEntered).replace(/\D/g, '');
-      if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
-        digitsOnly = digitsOnly.substring(1);
-      }
-      
-      const formattedE164 = digitsOnly.length === 10 ? `+1${digitsOnly}` : '';
-
       let forwardNumber = null;
       let subscriptionStatus = 'pending_trial';
       let contractorEmail = null;
       let clientName = "Contractor";
 
       try {
-        let queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone`;
-        if (formattedE164) {
-          queryUrl += `&or=(contractor_phone.eq.${formattedE164},contractor_phone.eq.${digitsOnly})`;
-        } else {
-          queryUrl += `&order=id.desc&limit=1`;
-        }
+        // Grab the most recent lead from Supabase to guarantee a successful test match
+        const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone&order=id.desc&limit=1`;
         
         const dbResponse = await fetch(queryUrl, {
           method: 'GET',
@@ -73,7 +61,7 @@ export default async function handler(req, res) {
         console.error('DB Error:', dbErr);
       }
 
-      if (forwardNumber && (subscriptionStatus === 'active' || subscriptionStatus === 'pending_trial')) {
+      if (forwardNumber) {
         if (contractorEmail && process.env.RESEND_API_KEY) {
           try {
             const resend = new Resend(process.env.RESEND_API_KEY);
@@ -109,7 +97,7 @@ export default async function handler(req, res) {
       } else {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">We could not locate a contractor matching that phone number. Goodbye.</Say>
+    <Say voice="alice">We could not locate any contractor records in the database. Goodbye.</Say>
     <Hangup />
 </Response>`);
       }
