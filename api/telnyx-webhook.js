@@ -27,7 +27,7 @@ export default async function handler(req, res) {
     
     const currentStep = req.query.step || body.step || '';
     const digitsEntered = body.Digits || body.digits || req.query.digits || "";
-    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || "";
+    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
@@ -41,10 +41,10 @@ export default async function handler(req, res) {
 </Response>`);
     }
 
-    const isRecordingFinished = recordingUrl || body.RecordingUrl || body.CallStatus === 'completed' || currentStep === 'route';
+    // STEP 3: Route call if we have a recording URL or step is explicitly route
+    const isRouteStep = currentStep === 'route' || Boolean(recordingUrl) || body.CallStatus === 'completed' || (body.RecordingSid);
 
-    // STEP 3: Route call after recording or if step is route
-    if (currentStep === 'route' || isRecordingFinished) {
+    if (isRouteStep && currentStep !== 'record' && currentStep !== 'connect' && !body.Digits) {
       let forwardNumber = null;
       let contractorEmail = null;
       let clientName = "Contractor";
@@ -122,7 +122,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // STEP 2: Record prompt (Explicitly ensure step=route is maintained in action URL)
+    // STEP 2: Record prompt (Triggered after entering contractor number)
     if (currentStep === 'record' || body.Digits || body.digits) {
       const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route`;
 
