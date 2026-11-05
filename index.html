@@ -48,7 +48,7 @@
         Turn missed phone calls into $1,000+ booked jobs. Automatically.
       </h2>
       <p class="text-lg md:text-xl text-gray-600 mb-8 font-normal leading-relaxed">
-        When an emergency call goes unanswered, Heartland Dispatch answers instantly, records the customer's description, dispatches your on-call team, and emails you a high-accuracy AI summary. <strong>Capturing just one extra job per month pays for itself 4x over.</strong>
+        When an emergency call goes unanswered, Heartland Dispatch answers instantly, captures the customer's description, routes the live call to your on-duty team, and emails an immediate alert. <strong>Capturing just one extra job per month pays for itself 4x over.</strong>
       </p>
       
       <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 mb-16">
@@ -98,10 +98,10 @@
               Status: Unanswered / Busy
             </div>
             <div id="autoReply" class="bg-black text-white p-3 rounded-md text-xs max-w-[85%] self-end hidden">
-              [Voice Automation]: "Thank you for calling. Please describe your emergency after the beep..."
+              [Voice Automation]: "Thank you for calling. Please describe your emergency situation after the beep, then press 7..."
             </div>
             <div id="customerReply" class="bg-gray-200 text-black p-3 rounded-md text-xs max-w-[85%] self-start hidden">
-              [AI Summary Email]: "AC compressor completely dead, water leaking in basement. Dispatched to team."
+              [Dispatch Alert]: "Connecting to on-duty team line. Voice recording alert sent to contractor email."
             </div>
           </div>
 
@@ -121,8 +121,8 @@
             <p>The caller is greeted immediately and prompted to describe their situation clearly after the beep.</p>
           </div>
           <div class="p-4 border-l-2 border-black bg-white">
-            <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">3. AI Transcription & Email Summary</h5>
-            <p>Our AI transcribes the emergency with high accuracy and instantly emails you a clean summary so you know what job you're walking into.</p>
+            <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">3. Direct On-Duty Dialing & Email Summary</h5>
+            <p>Your designated on-duty technician receives an immediate direct call while an email alert containing the caller's recording link is delivered to your inbox.</p>
           </div>
         </div>
       </div>
@@ -133,7 +133,7 @@
       <div class="max-w-xl mx-auto border border-black p-8 text-center bg-white">
         <h3 class="text-xs font-mono uppercase tracking-widest text-gray-500 mb-2">Flat Pricing. Massive ROI. No Contracts.</h3>
         <p class="text-4xl font-extrabold my-4">$250 <span class="text-base font-normal text-gray-500">/ month</span></p>
-        <p class="text-sm text-gray-600 mb-2">Includes unlimited voice dispatch routing, dedicated line setup, and AI-powered emergency email summaries.</p>
+        <p class="text-sm text-gray-600 mb-2">Includes unlimited voice dispatch routing, dedicated line setup, and instant emergency email summaries.</p>
         <p class="text-xs font-semibold text-black uppercase tracking-wide mb-6">💡 One saved $1,000 repair job pays for 4 months of service.</p>
         <button onclick="openModal()" class="w-full bg-black text-white py-4 text-xs font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-colors">
           Start 7-Day Free Trial
@@ -156,7 +156,7 @@
     </div>
   </footer>
 
-  <!-- Modal with Multi-Number Tag Input -->
+  <!-- Modal with Primary & Secondary On-Call Fields -->
   <div id="trialModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 hidden z-50">
     <div class="bg-white border border-black max-w-md w-full p-6 relative">
       <button onclick="closeModal()" class="absolute top-4 right-4 text-xs font-mono hover:underline">
@@ -175,18 +175,24 @@
           <input type="email" id="ownerEmail" placeholder="owner@company.com" required class="w-full border border-gray-300 p-2 text-sm focus:outline-none focus:border-black">
         </div>
         
-        <!-- Multi-Number Tag Field -->
         <div>
-          <label class="block text-xs font-mono uppercase mb-1">10-Digit Dispatch Phone Numbers</label>
+          <label class="block text-xs font-mono uppercase mb-1">Primary On-Call Phone Number</label>
+          <span class="block text-[11px] text-gray-500 -mt-0.5 mb-1">(One you want called on duty)</span>
+          <input type="tel" id="primaryPhone" placeholder="e.g., 6155550199" required class="w-full border border-gray-300 p-2 text-sm focus:outline-none focus:border-black">
+        </div>
+
+        <!-- Backup / Secondary Numbers Tag Field -->
+        <div>
+          <label class="block text-xs font-mono uppercase mb-1">Backup / Secondary Lines (Optional)</label>
           <div id="tagContainer" class="border border-gray-300 p-2 text-sm focus-within:border-black flex flex-wrap gap-1.5 min-h-[42px] items-center cursor-text" onclick="document.getElementById('phoneInput').focus()">
-            <input type="text" id="phoneInput" placeholder="Type 10-digit number and hit Enter or Space..." class="flex-1 min-w-[180px] text-sm focus:outline-none bg-transparent">
+            <input type="text" id="phoneInput" placeholder="Type 10-digit number and hit Enter..." class="flex-1 min-w-[180px] text-sm focus:outline-none bg-transparent">
           </div>
           <p class="text-[11px] text-gray-500 mt-1.5 leading-tight">
-            Press <strong>Enter</strong>, <strong>Space</strong>, or <strong>Comma</strong> to add each 10-digit number. Need to rotate staff later due to turnover? Simply email us anytime to update your list instantly.
+            Press <strong>Enter</strong> or <strong>Comma</strong> to add secondary backup numbers. Need to update staff numbers later? Email support anytime.
           </p>
         </div>
 
-        <button type="submit" class="w-full bg-black text-white py-3 text-xs font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-colors mt-2">
+        <button type="submit" id="submitBtn" class="w-full bg-black text-white py-3 text-xs font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-colors mt-2">
           Proceed to Stripe Checkout
         </button>
       </form>
@@ -195,7 +201,6 @@
   </div>
 
   <script>
-    // Modal Controls
     function openModal() {
       document.getElementById('trialModal').classList.remove('hidden');
     }
@@ -203,7 +208,6 @@
       document.getElementById('trialModal').classList.add('hidden');
     }
 
-    // Phone Tag Input Handling
     const tagContainer = document.getElementById('tagContainer');
     const phoneInput = document.getElementById('phoneInput');
     let phoneNumbers = [];
@@ -252,31 +256,47 @@
       });
     }
 
-    // Redirect to Stripe Checkout Link
-    function handleFormSubmit(event) {
+    // Submit form -> Save Lead to Supabase -> Redirect to Stripe
+    async function handleFormSubmit(event) {
       event.preventDefault();
 
-      if (phoneNumbers.length === 0 && phoneInput.value.trim() !== '') {
+      if (phoneInput.value.trim() !== '') {
         addTag(phoneInput.value.trim());
       }
 
-      if (phoneNumbers.length === 0) {
-        alert('Please enter at least one 10-digit dispatch phone number.');
-        return;
+      const compName = document.getElementById('compName').value;
+      const ownerEmail = document.getElementById('ownerEmail').value;
+      const primaryPhone = document.getElementById('primaryPhone').value;
+      const submitBtn = document.getElementById('submitBtn');
+
+      submitBtn.disabled = true;
+      submitBtn.innerText = "ACTIVATING TRIAL...";
+
+      try {
+        await fetch('/api/save-lead', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company_name: compName,
+            owner_email: ownerEmail,
+            primary_phone: primaryPhone,
+            backup_phones: phoneNumbers
+          })
+        });
+      } catch (err) {
+        console.error('Lead save error:', err);
       }
-      
+
       const stripeCheckoutUrl = "https://buy.stripe.com/14AfZ94a49dg9bkcmA0sU00";
-      
       const msg = document.getElementById('modalMsg');
       msg.classList.remove('hidden');
       msg.innerText = "Redirecting to secure Stripe checkout...";
 
       setTimeout(() => {
         window.location.href = stripeCheckoutUrl;
-      }, 800);
+      }, 600);
     }
 
-    // Demo Interactive Simulation
     function runSimulation() {
       const btn = document.getElementById('triggerSimBtn');
       const autoReply = document.getElementById('autoReply');
