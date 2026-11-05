@@ -25,21 +25,24 @@ export default async function handler(req, res) {
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
     
-    const currentStep = req.query.step || '';
+    // Check both query params and body parameters for the step
+    const currentStep = req.query.step || body.step || '';
     const digitsEntered = req.query.digits || body.Digits || body.digits || body.data?.payload?.digits || "";
-    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || "";
+    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.RecordingUrl || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // STEP 3: Route call after recording
-    if (currentStep === 'route') {
+    // Detect if this is a callback containing a recording or digits
+    const isRecordingFinished = recordingUrl || body.RecordingUrl || body.CallStatus === 'completed' || currentStep === 'route';
+
+    // STEP 3: Route call after recording or if step is route
+    if (currentStep === 'route' || isRecordingFinished) {
       let forwardNumber = null;
       let subscriptionStatus = 'pending_trial';
       let contractorEmail = null;
       let clientName = "Contractor";
 
       try {
-        // Grab the most recent lead from Supabase using created_at instead of id
         const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone&order=created_at.desc&limit=1`;
         
         const dbResponse = await fetch(queryUrl, {
@@ -106,9 +109,9 @@ export default async function handler(req, res) {
       }
     }
 
-    // STEP 2: Record prompt
-    if (currentStep === 'record') {
-      const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route&digits=${encodeURIComponent(digitsEntered)}`;
+    // STEP 2: Record prompt (Triggered after keypad digits are gathered)
+    if (currentStep === 'record' || body.Digits || body.digits) {
+      const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route`;
 
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
