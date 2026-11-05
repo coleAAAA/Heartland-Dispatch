@@ -15,16 +15,19 @@ export default async function handler(req, res) {
       } catch (err) {}
     }
 
+    console.log("TELNYX INCOMING WEBHOOK QUERY:", req.query);
+    console.log("TELNYX INCOMING WEBHOOK BODY:", JSON.stringify(body));
+
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
     
-    const rawTo = body.To || body.to || "";
-    const callerNumber = body.From || body.from || "Unknown Caller";
+    const rawTo = body.To || body.to || body.data?.payload?.to || "";
+    const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
     
     const currentStep = req.query.step || '';
-    const digitsEntered = req.query.digits || body.Digits || body.digits || "";
-    const recordingUrl = body.RecordingUrl || body.recording_url || "";
+    const digitsEntered = req.query.digits || body.Digits || body.digits || body.data?.payload?.digits || "";
+    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
