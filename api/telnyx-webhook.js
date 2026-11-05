@@ -25,14 +25,11 @@ export default async function handler(req, res) {
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
     
-    // Check both query params and body parameters for the step
     const currentStep = req.query.step || body.step || '';
-    const digitsEntered = req.query.digits || body.Digits || body.digits || body.data?.payload?.digits || "";
-    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.RecordingUrl || "";
+    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // Detect if this is a callback containing a recording or digits
     const isRecordingFinished = recordingUrl || body.RecordingUrl || body.CallStatus === 'completed' || currentStep === 'route';
 
     // STEP 3: Route call after recording or if step is route
@@ -43,7 +40,8 @@ export default async function handler(req, res) {
       let clientName = "Contractor";
 
       try {
-        const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone&order=created_at.desc&limit=1`;
+        // Query safely without ordering by missing columns like id or created_at
+        const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone&limit=1`;
         
         const dbResponse = await fetch(queryUrl, {
           method: 'GET',
@@ -54,8 +52,11 @@ export default async function handler(req, res) {
           }
         });
 
+        const responseText = await dbResponse.text();
+        console.log("SUPABASE FETCH RESPONSE:", responseText);
+
         if (dbResponse.ok) {
-          const rows = await dbResponse.json();
+          const rows = JSON.parse(responseText);
           if (rows && rows.length > 0) {
             forwardNumber = rows[0].forward_number || rows[0].contractor_phone;
             subscriptionStatus = rows[0].status || 'pending_trial';
@@ -109,7 +110,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // STEP 2: Record prompt (Triggered after keypad digits are gathered)
+    // STEP 2: Record prompt
     if (currentStep === 'record' || body.Digits || body.digits) {
       const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route`;
 
