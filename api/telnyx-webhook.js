@@ -2,7 +2,6 @@
 
 export default async function handler(req, res) {
   try {
-    // 1. Parse incoming request body
     let body = req.body || {};
     if (typeof body === 'string') {
       try { 
@@ -14,19 +13,18 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. Supabase Credentials
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
 
-    // 3. Extract call details from Telnyx webhook payload
-    const myTelnyxNumber = body.To || body.to || body.data?.payload?.to;
+    // Standardize incoming Telnyx number format with leading '+'
+    let rawTo = body.To || body.to || body.data?.payload?.to;
+    let myTelnyxNumber = rawTo ? (rawTo.startsWith('+') ? rawTo : `+${rawTo}`) : null;
     const customerPhone = body.From || body.from || body.data?.payload?.from;
 
     console.log(`Inbound Call from ${customerPhone} to Telnyx line ${myTelnyxNumber}`);
 
     let forwardNumber = null;
 
-    // 4. Direct REST API Query to Supabase
     if (myTelnyxNumber) {
       try {
         const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?telnyx_number=eq.${encodeURIComponent(myTelnyxNumber)}&select=forward_number`;
@@ -47,27 +45,24 @@ export default async function handler(req, res) {
             console.log(`Found matching forward number: ${forwardNumber}`);
           }
         } else {
-          console.error('Supabase REST query failed:', dbResponse.statusText);
+          console.error('Supabase REST query failed status:', dbResponse.status);
         }
       } catch (dbErr) {
         console.error('Database fetch error:', dbErr.message);
       }
     }
 
-    // 5. Generate TeXML Voice Response
     res.setHeader('Content-Type', 'text/xml');
 
     let audioResponseXml = '';
 
     if (forwardNumber) {
-      // Direct Call Forwarding to On-Call Technician / Dispatch Line
       audioResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Thank you for reaching out! Connecting you to our emergency team now.</Say>
     <Dial timeout="20">${forwardNumber}</Dial>
 </Response>`;
     } else {
-      // Standard Fallback Greeting if line is not bound in Supabase
       audioResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Thank you for reaching out to us! We will have a team member with you shortly to address the problem.</Say>
@@ -86,4 +81,5 @@ export default async function handler(req, res) {
     <Hangup />
 </Response>`);
   }
+}
 }
