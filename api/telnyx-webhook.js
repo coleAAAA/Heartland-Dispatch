@@ -26,17 +26,18 @@ export default async function handler(req, res) {
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
     
     const currentStep = req.query.step || body.step || '';
+    const digitsEntered = body.Digits || body.digits || req.query.digits || "";
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
     // STEP 4: Final bridge after contractor presses 1 to accept
-    if (currentStep === 'connect') {
-      const dialTarget = req.query.to || body.Digits || "";
+    if (currentStep === 'connect' || digitsEntered === '1') {
+      const dialTarget = req.query.to || body.to || "";
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Connecting you now.</Say>
-    <Dial timeout="25">${dialTarget}</Dial>
+    <Dial timeout="25" callerId="${masterTelnyxNumber || callerNumber}">${dialTarget}</Dial>
 </Response>`);
     }
 
@@ -104,7 +105,6 @@ export default async function handler(req, res) {
         const targetDialNumber = String(forwardNumber).split(',')[0].trim();
         const acceptCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=connect&to=${encodeURIComponent(targetDialNumber)}`;
 
-        // Screen the call so the receiving cell network registers human input and bypasses instant voicemail drop
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Gather action="${acceptCallbackUrl}" method="POST" numDigits="1" timeout="10">
