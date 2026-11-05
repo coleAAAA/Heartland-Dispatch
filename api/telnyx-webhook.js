@@ -30,6 +30,16 @@ export default async function handler(req, res) {
 
     res.setHeader('Content-Type', 'text/xml');
 
+    // STEP 4: Final bridge after contractor presses 1 to accept
+    if (currentStep === 'connect') {
+      const dialTarget = req.query.to || body.Digits || "";
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="alice">Connecting you now.</Say>
+    <Dial timeout="25">${dialTarget}</Dial>
+</Response>`);
+    }
+
     const isRecordingFinished = recordingUrl || body.RecordingUrl || body.CallStatus === 'completed' || currentStep === 'route';
 
     // STEP 3: Route call after recording or if step is route
@@ -92,11 +102,16 @@ export default async function handler(req, res) {
         }
 
         const targetDialNumber = String(forwardNumber).split(',')[0].trim();
+        const acceptCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=connect&to=${encodeURIComponent(targetDialNumber)}`;
 
+        // Screen the call so the receiving cell network registers human input and bypasses instant voicemail drop
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Connecting you to our on-call team member now.</Say>
-    <Dial timeout="25" callerId="${masterTelnyxNumber || callerNumber}">${targetDialNumber}</Dial>
+    <Gather action="${acceptCallbackUrl}" method="POST" numDigits="1" timeout="10">
+        <Say voice="alice">You have an emergency dispatch call. Press 1 to accept.</Say>
+    </Gather>
+    <Say voice="alice">No response received. Goodbye.</Say>
+    <Hangup />
 </Response>`);
       } else {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
