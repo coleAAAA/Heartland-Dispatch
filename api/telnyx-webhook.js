@@ -1,4 +1,4 @@
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
     let body = req.body || {};
     if (typeof body === 'string') {
@@ -67,4 +67,4 @@ module.exports = async function handler(req, res) {
     <Hangup />
 </Response>`);
   }
-};
+}
