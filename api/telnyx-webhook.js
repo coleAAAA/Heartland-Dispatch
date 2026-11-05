@@ -1,52 +1,35 @@
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY || '');
-
 export default async function handler(req, res) {
   try {
-    // Robust Body & Query Parsing for TeXML / Telnyx Form-Urlencoded payloads
-    let body = req.body || {};
-    if (typeof body === 'string') {
-      try { 
-        body = JSON.parse(body); 
-      } catch (e) {
-        try { 
-          body = Object.fromEntries(new URLSearchParams(body).entries()); 
-        } catch (err) {}
+    // Basic body parsing safe for any Node version
+    let body = {};
+    try {
+      if (typeof req.body === 'string') {
+        body = JSON.parse(req.body);
+      } else if (req.body && typeof req.body === 'object') {
+        body = req.body;
       }
-    } else if (Buffer.isBuffer(body)) {
+    } catch (e) {
       try {
-        body = Object.fromEntries(new URLSearchParams(body.toString()).entries());
-      } catch (e) {
-        body = {};
-      }
-    } else if (typeof body === 'object' && Object.keys(body).length === 0 && req.method === 'POST') {
-      // Fallback if Vercel passes raw urlencoded body as text/stream chunks
-      try {
-        let rawBody = '';
-        for await (const chunk of req) {
-          rawBody += chunk;
-        }
-        body = Object.fromEntries(new URLSearchParams(rawBody).entries());
+        body = Object.fromEntries(new URLSearchParams(req.body).entries());
       } catch (err) {}
     }
 
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
     
-    const rawTo = body.To || body.to || body.data?.payload?.to || "";
-    const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
+    const rawTo = body.To || body.to || "";
+    const callerNumber = body.From || body.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : null);
     
     const currentStep = req.query.step || '';
-    
-    // Capture digits from query string (if passed forward) or Telnyx form body (Digits / digits)
-    const digitsEntered = req.query.digits || body.Digits || body.digits || body.data?.payload?.digits || "";
-    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || "";
+    const digitsEntered = req.query.digits || body.Digits || body.digits || "";
+    const recordingUrl = body.RecordingUrl || body.recording_url || "";
 
     res.setHeader('Content-Type', 'text/xml');
 
-    // STEP 3: Voice summary recorded -> Send Resend Email -> Dial Contractor Line
+    // STEP 3: Route call after recording
     if (currentStep === 'route') {
       let digitsOnly = String(digitsEntered).replace(/\D/g, '');
       if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
@@ -62,9 +45,8 @@ export default async function handler(req, res) {
 
       try {
         let queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone`;
-        
         if (formattedE164) {
-          queryUrl += `&or=(contractor_phone.eq.${encodeURIComponent(formattedE164)},contractor_phone.eq.${encodeURIComponent(digitsOnly)})`;
+          queryUrl += `&or=(contractor_phone.eq.${formattedE164},contractor_phone.eq.${digitsOnly})`;
         } else {
           queryUrl += `&order=id.desc&limit=1`;
         }
@@ -78,7 +60,7 @@ export default async function handler(req, res) {
           }
         });
 
-        if (dbResponse && dbResponse.ok) {
+        if (dbResponse.ok) {
           const rows = await dbResponse.json();
           if (rows && rows.length > 0) {
             forwardNumber = rows[0].forward_number || rows[0].contractor_phone;
@@ -88,15 +70,15 @@ export default async function handler(req, res) {
           }
         }
       } catch (dbErr) {
-        console.error('Database query exception:', dbErr);
+        console.error('DB Error:', dbErr);
       }
 
       if (forwardNumber && (subscriptionStatus === 'active' || subscriptionStatus === 'pending_trial')) {
-        
-        if (contractorEmail) {
+        if (contractorEmail && process.env.RESEND_API_KEY) {
           try {
+            const resend = new Resend(process.env.RESEND_API_KEY);
             await resend.emails.send({
-              from: process.env.RESEND_FROM_EMAIL || 'Heartland Dispatch <onboarding@resend.dev>',
+              from: 'Heartland Dispatch <onboarding@resend.dev>',
               to: contractorEmail,
               subject: `🚨 Emergency Call Alert - Call from ${callerNumber}`,
               html: `
@@ -104,31 +86,26 @@ export default async function handler(req, res) {
                   <h2 style="color: #000; text-transform: uppercase;">🚨 New Emergency Call Dispatched</h2>
                   <p>Hello <strong>${clientName}</strong>,</p>
                   <p>An emergency caller was just connected to your dispatch line.</p>
-                  
                   <div style="background-color: #f9f9f9; padding: 15px; margin: 15px 0; font-family: monospace;">
                     <p style="margin: 4px 0;"><strong>Caller Phone:</strong> ${callerNumber}</p>
                     <p style="margin: 4px 0;"><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
-                    ${recordingUrl ? `<p style="margin: 4px 0;"><strong>Voice Summary Audio:</strong> <a href="${recordingUrl}" target="_blank" style="color: #000; text-decoration: underline;">Listen To Audio Summary</a></p>` : ''}
+                    ${recordingUrl ? `<p style="margin: 4px 0;"><strong>Voice Summary Audio:</strong> <a href="${recordingUrl}" target="_blank">Listen To Audio Summary</a></p>` : ''}
                   </div>
-                  
-                  <p style="font-size: 11px; color: #888; margin-top: 20px;">Heartland Dispatch Automated System</p>
                 </div>
               `
             });
           } catch (emailErr) {
-            console.error('Resend email exception:', emailErr);
+            console.error('Email Error:', emailErr);
           }
         }
 
-        const safeForward = String(forwardNumber || '').trim();
-        const targetDialNumber = safeForward.includes(',') ? safeForward.split(',')[0].trim() : safeForward;
+        const targetDialNumber = String(forwardNumber).split(',')[0].trim();
 
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Connecting you to our on-call team member now.</Say>
     <Dial timeout="25" callerId="${masterTelnyxNumber || callerNumber}">${targetDialNumber}</Dial>
 </Response>`);
-
       } else {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -138,7 +115,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // STEP 2: Capture emergency voice situation description (Pass digits forward via query param)
+    // STEP 2: Record prompt
     if (currentStep === 'record') {
       const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route&digits=${encodeURIComponent(digitsEntered)}`;
 
@@ -150,20 +127,20 @@ export default async function handler(req, res) {
 </Response>`);
     }
 
-    // STEP 1: Initial Inbound Call - Gather keypad input
+    // STEP 1: Gather Initial Digits
     const gatherCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=record`;
 
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Gather action="${gatherCallbackUrl}" method="POST" numDigits="10" timeout="8">
-        <Say voice="alice">Thank you for using Heartland Dispatch emergency service. Our team will be with you shortly. Please enter your contractor's 10-digit phone number on your keypad now.</Say>
+        <Say voice="alice">Thank you for using Heartland Dispatch emergency service. Please enter your contractor's 10-digit phone number on your keypad now.</Say>
     </Gather>
     <Say voice="alice">We did not receive any keypad input. Goodbye.</Say>
     <Hangup />
 </Response>`);
 
   } catch (error) {
-    console.error('CRITICAL WEBHOOK EXCEPTION:', error);
+    console.error('CRITICAL ERROR:', error);
     res.setHeader('Content-Type', 'text/xml');
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
