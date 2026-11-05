@@ -14,9 +14,9 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. Hardcoded Supabase Credentials
-    const SUPABASE_URL = "https://YOUR_SUPABASE_PROJECT_ID.supabase.co";
-    const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+    // 2. Supabase Credentials
+    const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
 
     // 3. Extract call details from Telnyx webhook payload
     const myTelnyxNumber = body.To || body.to || body.data?.payload?.to;
@@ -26,10 +26,10 @@ export default async function handler(req, res) {
 
     let forwardNumber = null;
 
-    // 4. Direct REST API Query to Supabase (No npm package required)
+    // 4. Direct REST API Query to Supabase
     if (myTelnyxNumber) {
       try {
-        const queryUrl = `${SUPABASE_URL}/rest/v1/clients?telnyx_number=eq.${encodeURIComponent(myTelnyxNumber)}&select=forward_number`;
+        const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?telnyx_number=eq.${encodeURIComponent(myTelnyxNumber)}&select=forward_number`;
         
         const dbResponse = await fetch(queryUrl, {
           method: 'GET',
