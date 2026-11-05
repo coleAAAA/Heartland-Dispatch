@@ -35,13 +35,12 @@ export default async function handler(req, res) {
     // STEP 3: Route call after recording or if step is route
     if (currentStep === 'route' || isRecordingFinished) {
       let forwardNumber = null;
-      let subscriptionStatus = 'pending_trial';
       let contractorEmail = null;
       let clientName = "Contractor";
 
       try {
-        // Query safely without ordering by missing columns like id or created_at
-        const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,status,email,client_name,contractor_phone&limit=1`;
+        // Only select columns that actually exist on your clients table
+        const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&limit=1`;
         
         const dbResponse = await fetch(queryUrl, {
           method: 'GET',
@@ -59,7 +58,6 @@ export default async function handler(req, res) {
           const rows = JSON.parse(responseText);
           if (rows && rows.length > 0) {
             forwardNumber = rows[0].forward_number || rows[0].contractor_phone;
-            subscriptionStatus = rows[0].status || 'pending_trial';
             contractorEmail = rows[0].email;
             clientName = rows[0].client_name || "Contractor";
           }
