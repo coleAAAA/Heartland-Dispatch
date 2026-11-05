@@ -95,10 +95,13 @@ export default async function handler(req, res) {
 
         const targetDialNumber = String(forwardNumber).split(',')[0].trim();
 
+        // Passed explicit callerId and answering audio stream to bypass carrier silent-drop spam filters
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Emergency dispatch call detected. Connecting you to the on-call team member now.</Say>
-    <Dial timeout="30" callerId="${masterTelnyxNumber || callerNumber}">${targetDialNumber}</Dial>
+    <Say voice="alice">Emergency dispatch call. Connecting you now.</Say>
+    <Dial timeout="35" callerId="${callerNumber}">
+        <Number>${targetDialNumber}</Number>
+    </Dial>
 </Response>`);
       } else {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
