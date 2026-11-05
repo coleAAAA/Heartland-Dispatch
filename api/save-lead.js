@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // Allow CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -9,8 +8,7 @@ export default async function handler(req, res) {
   );
 
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
+    return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
@@ -23,15 +21,24 @@ export default async function handler(req, res) {
       try { body = JSON.parse(body); } catch (e) {}
     }
 
-    const { client_name, contractor_phone, forward_number, email } = body;
+    // Accept both old and new field names so nothing breaks
+    const client_name = body.company_name || body.client_name;
+    const contractor_phone = body.primary_phone || body.contractor_phone;
+    const forward_number = (body.backup_phones && body.backup_phones[0]) || body.forward_number || contractor_phone;
+    const email = body.owner_email || body.email;
 
-    if (!contractor_phone || !forward_number) {
-      return res.status(400).json({ error: 'Missing required phone numbers' });
+    if (!contractor_phone) {
+      return res.status(400).json({ error: 'Missing required contractor phone number' });
     }
 
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
-    const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || "sb_publishable_s5g6zto95X5OcknvsfTsYg_w_orUPV0";
+    const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+    if (!SUPABASE_KEY) {
+      return res.status(500).json({ error: 'Server configuration error: Supabase key missing' });
+    }
+
+    // Perfectly matched to your Supabase columns: client_name, contractor_phone, forward_number, email
     const payload = {
       client_name: client_name || "Heartland Dispatch Client",
       contractor_phone: String(contractor_phone).trim(),
