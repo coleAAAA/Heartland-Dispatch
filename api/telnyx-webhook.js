@@ -32,7 +32,6 @@ export default async function handler(req, res) {
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : "+16155550199");
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
 
-    // Pull digits from query or body fallback
     const enteredDigits = query.digits || query.Digits || body.Digits || body.digits || "";
     const cleanDigits = String(enteredDigits).replace(/\D/g, '');
 
@@ -41,6 +40,7 @@ export default async function handler(req, res) {
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
     const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
+    const validateUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
 
     // ------------------------------------------------------------------
     // STEP 3: Route Final Call, Deliver Email & Outbound Ring
@@ -52,7 +52,8 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&or=(contractor_phone.eq.${cleanDigits},contractor_phone.eq.%2B1${cleanDigits})`;
+          // Correct PostgREST wildcard syntax using asterisks (*)
+          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=ilike.*${cleanDigits}*`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
@@ -69,6 +70,8 @@ export default async function handler(req, res) {
               contractorEmail = rows[0].email || null;
               clientName = rows[0].client_name || "Contractor";
             }
+          } else {
+            console.error('[ROUTE DB ERROR]', await dbResponse.text());
           }
         } catch (dbErr) {
           console.error('[ROUTE DB EXCEPTION]', dbErr);
@@ -135,12 +138,12 @@ export default async function handler(req, res) {
     // ------------------------------------------------------------------
     // STEP 2: Validate Digits & Prompt For Voice Recording
     // ------------------------------------------------------------------
-    if (currentStep === 'validate' || (cleanDigits.length >= 10 && currentStep !== 'record')) {
+    if (currentStep === 'validate' || (cleanDigits.length > 0 && currentStep !== 'record')) {
       let contractorExists = false;
 
-      if (cleanDigits && SUPABASE_KEY) {
+      if (cleanDigits.length >= 10 && SUPABASE_KEY) {
         try {
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&or=(contractor_phone.eq.${cleanDigits},contractor_phone.eq.%2B1${cleanDigits})`;
+          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=ilike.*${cleanDigits}*`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
@@ -162,18 +165,16 @@ export default async function handler(req, res) {
       }
 
       if (!contractorExists) {
-        const retryGatherUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather action="${retryGatherUrl}" method="POST" numDigits="10" timeout="10">
-        <Say voice="alice">We could not find an active contractor matching that phone number. Please double check and enter the 10-digit phone number on your keypad now.</Say>
+    <Gather action="${validateUrl}" method="POST" finishOnKey="#" timeout="12">
+        <Say voice="alice">We could not find an active contractor matching that phone number. Please re-enter the 10-digit phone number on your keypad, followed by the pound key.</Say>
     </Gather>
-    <Say voice="alice">We did not receive a valid phone number. Thank you for calling Heartland Dispatch. Goodbye.</Say>
+    <Say voice="alice">We did not receive any keypad input. Thank you for calling Heartland Dispatch. Goodbye.</Say>
     <Hangup />
 </Response>`);
       }
 
-      // FIXED: Passed cleanDigits forward into the record action callback URL
       const recordCallbackUrl = `https://${hostHeader}/api/telnyx-webhook?step=route&digits=${cleanDigits}`;
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -186,13 +187,12 @@ export default async function handler(req, res) {
     // ------------------------------------------------------------------
     // STEP 1: Initial Inbound Greeting
     // ------------------------------------------------------------------
-    const initialGatherUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather action="${initialGatherUrl}" method="POST" numDigits="10" timeout="15">
-        <Say voice="alice">Thank you for calling Heartland Dispatch emergency service. Please enter your contractor's 10-digit phone number on your keypad now.</Say>
+    <Gather action="${validateUrl}" method="POST" finishOnKey="#" timeout="15">
+        <Say voice="alice">Thank you for calling Heartland Dispatch emergency service. Please enter your contractor's 10-digit phone number, followed by the pound key.</Say>
     </Gather>
-    <Say voice="alice">We did not receive any keypad input. Goodbye.</Say>
+    <Say voice="alice">We did not receive any keypad input. Thank you for calling Heartland Dispatch. Goodbye.</Say>
     <Hangup />
 </Response>`);
 
