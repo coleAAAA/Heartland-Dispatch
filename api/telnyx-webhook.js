@@ -1,46 +1,61 @@
 import { Resend } from 'resend';
-import querystring from 'querystring';
 
 export default async function handler(req, res) {
   // Always set XML header first so Telnyx never throws an application error
   res.setHeader('Content-Type', 'text/xml');
 
   try {
+    // 1. Unified and bulletproof body/query parameter extraction
     let body = {};
     if (req.body) {
       if (typeof req.body === 'string') {
-        body = querystring.parse(req.body);
+        try {
+          body = JSON.parse(req.body);
+        } catch (e) {
+          try {
+            const params = new URLSearchParams(req.body);
+            body = Object.fromEntries(params.entries());
+          } catch (err) {
+            body = {};
+          }
+        }
       } else if (Buffer.isBuffer(req.body)) {
-        body = querystring.parse(req.body.toString('utf8'));
+        try {
+          const str = req.body.toString('utf8');
+          const params = new URLSearchParams(str);
+          body = Object.fromEntries(params.entries());
+        } catch (err) {
+          body = {};
+        }
       } else if (typeof req.body === 'object') {
         body = req.body;
       }
     }
 
     const query = req.query || {};
-    const currentStep = query.step || body.step || '';
+    const merged = { ...query, ...body };
 
-    const rawTo = body.To || body.to || '';
-    const callerNumber = body.From || body.from || 'Unknown Caller';
+    const currentStep = merged.step || '';
+    const rawTo = merged.To || merged.to || '';
+    const callerNumber = merged.From || merged.from || 'Unknown Caller';
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : '+16155550199');
-    const recordingUrl = body.RecordingUrl || body.recording_url || '';
+    const recordingUrl = merged.RecordingUrl || merged.recording_url || merged.recordingUrl || '';
 
-    const rawDigits = query.digits || body.Digits || body.digits || '';
+    const rawDigits = merged.digits || merged.Digits || merged.DIGITS || '';
     const cleanDigits = String(rawDigits).replace(/\D/g, '');
 
-    console.log(`[TELNYX WEBHOOK] Step: "${currentStep}" | Keypad Digits: "${cleanDigits}"`);
+    console.log(`[PIPELINE] Step: "${currentStep}" | Digits: "${cleanDigits}" | Caller: "${callerNumber}"`);
 
     const SUPABASE_BASE_URL = 'https://oexjbmllasslcxfqprlq.supabase.co';
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
     const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
     const validateUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
 
-    // Helper to find contractor row cleanly in JS (immune to DB formatting differences)
-    async function findContractorRow(digits) {
-      if (!digits || !SUPABASE_KEY) return null;
+    // 2. Intelligent JavaScript-side matching (immune to DB formatting issues)
+    async function smartFindContractor(enteredDigits) {
+      if (!enteredDigits || !SUPABASE_KEY) return null;
       try {
-        const dbUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=*`;
-        const dbResponse = await fetch(dbUrl, {
+        const dbResponse = await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients?select=*`, {
           method: 'GET',
           headers: {
             'apikey': SUPABASE_KEY,
@@ -48,22 +63,21 @@ export default async function handler(req, res) {
             'Content-Type': 'application/json'
           }
         });
+        if (!dbResponse.ok) return null;
+        const rows = await dbResponse.json();
+        if (!rows || rows.length === 0) return null;
 
-        if (dbResponse.ok) {
-          const rows = await dbResponse.json();
-          if (rows && rows.length > 0) {
-            // Match where cleaned contractor_phone ends with or equals the entered digits
-            const matched = rows.find(row => {
-              const dbPhone = String(row.contractor_phone || '').replace(/\D/g, '');
-              return dbPhone === digits || dbPhone.endsWith(digits) || digits.endsWith(dbPhone);
-            });
-            if (matched) return matched;
-          }
-        }
+        // Match where cleaned database phone matches entered digits
+        const match = rows.find(r => {
+          const dbClean = String(r.contractor_phone || '').replace(/\D/g, '');
+          return dbClean === enteredDigits || dbClean.endsWith(enteredDigits) || enteredDigits.endsWith(dbClean) || dbClean.includes(enteredDigits);
+        });
+
+        return match || null;
       } catch (err) {
-        console.error('[DB FETCH EXCEPTION]', err);
+        console.error('[SMART FIND ERROR]', err);
+        return null;
       }
-      return null;
     }
 
     // ------------------------------------------------------------------
@@ -74,17 +88,17 @@ export default async function handler(req, res) {
       let contractorEmail = null;
       let clientName = 'Contractor';
 
-      const contractor = await findContractorRow(cleanDigits);
+      const contractor = await smartFindContractor(cleanDigits);
       if (contractor) {
         forwardNumber = contractor.forward_number || contractor.contractor_phone || null;
         contractorEmail = contractor.email || null;
         clientName = contractor.client_name || 'Contractor';
-        console.log(`[DB MATCH SUCCESS] Client: ${clientName} | Forward: ${forwardNumber} | Email: ${contractorEmail}`);
+        console.log(`[MATCH FOUND] Client: ${clientName} | Forward: ${forwardNumber} | Email: ${contractorEmail}`);
       } else {
-        console.warn(`[DB MATCH FAILED] No contractor found for digits: ${cleanDigits}`);
+        console.warn(`[MATCH FAILED] No contractor found for digits: ${cleanDigits}`);
       }
 
-      // 1. Deliver Resend Email Alert
+      // 1. Deliver Resend Email Alert (Non-fatal)
       if (contractorEmail && contractorEmail !== 'null' && process.env.RESEND_API_KEY) {
         try {
           const resend = new Resend(process.env.RESEND_API_KEY);
@@ -106,20 +120,20 @@ export default async function handler(req, res) {
               </div>
             `
           });
-          console.log('[RESEND EMAIL SENT SUCCESSFULLY]');
+          console.log('[RESEND EMAIL SENT]');
         } catch (mailErr) {
-          console.error('[RESEND ERROR]', mailErr);
+          console.error('[RESEND NON-FATAL ERROR]', mailErr);
         }
       }
 
-      // 2. Outbound Dialing to Contractor's Cell (`forward_number`)
+      // 2. Outbound Call to Contractor (Non-fatal)
       if (forwardNumber && process.env.TELNYX_API_KEY) {
         try {
           const targetNumber = String(forwardNumber).split(',')[0].trim();
           const cleanTo = targetNumber.startsWith('+') ? targetNumber : `+1${targetNumber}`;
           const cleanFrom = masterTelnyxNumber.length > 3 ? masterTelnyxNumber : '+16155550199';
 
-          const telnyxRes = await fetch('https://api.telnyx.com/v2/calls', {
+          await fetch('https://api.telnyx.com/v2/calls', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
@@ -132,10 +146,9 @@ export default async function handler(req, res) {
               webhook_url: `https://${hostHeader}/api/telnyx-webhook?step=outbound_alert`
             })
           });
-          const telnyxData = await telnyxRes.json();
-          console.log('[TELNYX OUTBOUND RESPONSE]', telnyxRes.status, JSON.stringify(telnyxData));
+          console.log(`[OUTBOUND DIALED] Target: ${cleanTo}`);
         } catch (outboundErr) {
-          console.error('[OUTBOUND DIAL ERROR]', outboundErr);
+          console.error('[TELNYX OUTBOUND NON-FATAL ERROR]', outboundErr);
         }
       }
 
@@ -153,13 +166,12 @@ export default async function handler(req, res) {
       let contractorExists = false;
 
       if (cleanDigits.length >= 10 && SUPABASE_KEY) {
-        const contractor = await findContractorRow(cleanDigits);
+        const contractor = await smartFindContractor(cleanDigits);
         if (contractor) {
           contractorExists = true;
         }
       }
 
-      // If not found, loop back to prompt for re-entry
       if (!contractorExists) {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
