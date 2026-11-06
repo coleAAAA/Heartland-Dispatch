@@ -1,29 +1,28 @@
 import { Resend } from 'resend';
 
 export default async function handler(req, res) {
+  // Always ensure XML header is sent first
   res.setHeader('Content-Type', 'text/xml');
 
   try {
+    // 1. Safe Body Parser
     let body = {};
-    let rawBody = req.body;
-
-    if (Buffer.isBuffer(rawBody)) {
-      rawBody = rawBody.toString('utf8');
-    }
-
-    if (typeof rawBody === 'string') {
-      try {
-        body = JSON.parse(rawBody);
-      } catch (e) {
+    try {
+      let rawBody = req.body;
+      if (Buffer.isBuffer(rawBody)) rawBody = rawBody.toString('utf8');
+      
+      if (typeof rawBody === 'string') {
         try {
+          body = JSON.parse(rawBody);
+        } catch (e) {
           const params = new URLSearchParams(rawBody);
           body = Object.fromEntries(params.entries());
-        } catch (err) {
-          body = {};
         }
+      } else if (rawBody && typeof rawBody === 'object') {
+        body = rawBody;
       }
-    } else if (rawBody && typeof rawBody === 'object') {
-      body = rawBody;
+    } catch (parseErr) {
+      console.error('Body Parse Error:', parseErr);
     }
 
     const query = req.query || {};
@@ -37,22 +36,21 @@ export default async function handler(req, res) {
     const enteredDigits = query.digits || query.Digits || body.Digits || body.digits || "";
     const cleanDigits = String(enteredDigits).replace(/\D/g, '');
 
-    console.log("EXTRACTED CLEAN 10-DIGITS:", cleanDigits);
-
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
 
     // ------------------------------------------------------------------
-    // STEP 3: Route Final Call, Deliver Email Alert & Trigger Outbound Call
+    // STEP 3: Route Final Call, Deliver Email & Outbound Ring
     // ------------------------------------------------------------------
     if (currentStep === 'route') {
       let forwardNumber = null;
       let contractorEmail = null;
       let clientName = "Contractor";
 
+      // Database Lookup (Safely isolated)
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          // FIXED: Use PostgREST native asterisk wildcard syntax (*digits*)
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=like.*${cleanDigits}*`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
@@ -76,11 +74,11 @@ export default async function handler(req, res) {
         }
       }
 
-      // Send Email Alert via Resend
+      // Email Dispatch (Safely isolated)
       if (contractorEmail && contractorEmail !== 'null' && process.env.RESEND_API_KEY) {
         try {
           const resend = new Resend(process.env.RESEND_API_KEY);
-          resend.emails.send({
+          await resend.emails.send({
             from: 'Heartland Dispatch <onboarding@resend.dev>',
             to: contractorEmail,
             subject: `🚨 Emergency Call Alert from ${callerNumber}`,
@@ -97,21 +95,20 @@ export default async function handler(req, res) {
                 </div>
               </div>
             `
-          }).catch(mailErr => console.error('Background Email Error:', mailErr));
-        } catch (emailInitErr) {
-          console.error('Resend Init Error:', emailInitErr);
+          });
+        } catch (mailErr) {
+          console.error('Resend Error:', mailErr);
         }
       }
 
-      // Trigger Outbound Call to Contractor
+      // Outbound Call Trigger (Safely isolated)
       if (forwardNumber && process.env.TELNYX_API_KEY) {
         try {
           const targetNumber = String(forwardNumber).split(',')[0].trim();
           const cleanTo = targetNumber.startsWith('+') ? targetNumber : `+1${targetNumber}`;
           const cleanFrom = masterTelnyxNumber.length > 3 ? masterTelnyxNumber : "+16155550199";
 
-          const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
-          fetch('https://api.telnyx.com/v2/calls', {
+          await fetch('https://api.telnyx.com/v2/calls', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
@@ -123,7 +120,7 @@ export default async function handler(req, res) {
               from: cleanFrom,
               webhook_url: `https://${hostHeader}/api/telnyx-webhook?step=outbound_alert`
             })
-          }).catch(telnyxErr => console.error('Background Outbound Call Error:', telnyxErr));
+          });
         } catch (outboundErr) {
           console.error('Outbound Call Error:', outboundErr);
         }
@@ -137,14 +134,13 @@ export default async function handler(req, res) {
     }
 
     // ------------------------------------------------------------------
-    // STEP 2: Validate Entered Digits & Prompt For Voice Recording
+    // STEP 2: Validate Digits & Prompt For Voice Recording
     // ------------------------------------------------------------------
     if (currentStep === 'validate' || (cleanDigits.length >= 10 && currentStep !== 'record')) {
       let contractorExists = false;
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          // FIXED: Use PostgREST native asterisk wildcard syntax (*digits*)
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=like.*${cleanDigits}*`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
@@ -165,8 +161,6 @@ export default async function handler(req, res) {
           console.error('Database Validation Error:', dbErr);
         }
       }
-
-      const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
 
       if (!contractorExists) {
         const retryGatherUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
@@ -190,11 +184,9 @@ export default async function handler(req, res) {
     }
 
     // ------------------------------------------------------------------
-    // STEP 1: Initial Inbound Call Greeting & Gather Digits
+    // STEP 1: Initial Inbound Greeting
     // ------------------------------------------------------------------
-    const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
     const initialGatherUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
-
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Gather action="${initialGatherUrl}" method="POST" numDigits="10" timeout="15">
