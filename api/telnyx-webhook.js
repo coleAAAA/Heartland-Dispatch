@@ -4,7 +4,6 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'text/xml');
 
   try {
-    // 1. Bulletproof Vercel Body Parser (Handles Buffers, Form-URLEncoded strings, and JSON)
     let body = {};
     let rawBody = req.body;
 
@@ -30,19 +29,15 @@ export default async function handler(req, res) {
     const query = req.query || {};
     const currentStep = query.step || body.step || '';
 
-    console.log("PARSED QUERY:", JSON.stringify(query));
-    console.log("PARSED BODY:", JSON.stringify(body));
-
     const rawTo = body.To || body.to || body.data?.payload?.to || "";
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : "+16155550199");
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
 
-    // 2. Extract Digits from Telnyx TeXML Form Post
     const enteredDigits = query.digits || query.Digits || body.Digits || body.digits || "";
     const cleanDigits = String(enteredDigits).replace(/\D/g, '');
 
-    console.log("EXTRACTED DIGITS:", enteredDigits, "-> CLEAN 10-DIGITS:", cleanDigits);
+    console.log("EXTRACTED CLEAN 10-DIGITS:", cleanDigits);
 
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -57,8 +52,8 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          // ilike wildcard matches whether stored as 5625089424 or +15625089424
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=ilike.%${cleanDigits}`;
+          // FIXED: Use PostgREST native asterisk wildcard syntax (*digits*)
+          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=like.*${cleanDigits}*`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
@@ -149,7 +144,8 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=ilike.%${cleanDigits}`;
+          // FIXED: Use PostgREST native asterisk wildcard syntax (*digits*)
+          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=like.*${cleanDigits}*`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
