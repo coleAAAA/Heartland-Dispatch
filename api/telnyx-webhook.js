@@ -4,50 +4,78 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'text/xml');
 
   try {
+    // 1. Foolproof URL and Body Parameter Extraction
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const host = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
+    const parsedUrl = new URL(req.url || '', `${protocol}://${host}`);
+    
+    const queryStep = parsedUrl.searchParams.get('step') || '';
+    const queryDigits = parsedUrl.searchParams.get('digits') || '';
+
     let body = {};
     if (req.body) {
       if (typeof req.body === 'string') {
-        try {
-          body = JSON.parse(req.body);
-        } catch (e) {
-          try {
-            const params = new URLSearchParams(req.body);
-            body = Object.fromEntries(params.entries());
-          } catch (err) {
-            body = {};
-          }
+        try { body = JSON.parse(req.body); } 
+        catch {
+          try { body = Object.fromEntries(new URLSearchParams(req.body).entries()); } catch {}
         }
       } else if (Buffer.isBuffer(req.body)) {
         try {
-          const str = req.body.toString('utf8');
-          const params = new URLSearchParams(str);
-          body = Object.fromEntries(params.entries());
-        } catch (err) {
-          body = {};
-        }
+          body = Object.fromEntries(new URLSearchParams(req.body.toString('utf8')).entries());
+        } catch {}
       } else if (typeof req.body === 'object') {
         body = req.body;
       }
     }
 
-    const query = req.query || {};
-    const merged = { ...query, ...body };
-
-    const currentStep = merged.step || '';
-    const rawTo = merged.To || merged.to || '';
-    const callerNumber = merged.From || merged.from || 'Unknown Caller';
+    const currentStep = queryStep || body.step || '';
+    const rawTo = body.To || body.to || '';
+    const callerNumber = body.From || body.from || 'Unknown Caller';
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : '+16155550199');
-    const recordingUrl = merged.RecordingUrl || merged.recording_url || merged.recordingUrl || '';
+    const recordingUrl = body.RecordingUrl || body.recording_url || '';
 
-    const rawDigits = merged.digits || merged.Digits || merged.DIGITS || '';
+    const rawDigits = queryDigits || body.Digits || body.digits || '';
     const cleanDigits = String(rawDigits).replace(/\D/g, '');
 
-    console.log(`[KEYPAD PIPELINE] Step: "${currentStep}" | Digits: "${cleanDigits}"`);
+    console.log(`[CALL PIPELINE] Step: "${currentStep}" | Digits: "${cleanDigits}" | Caller: "${callerNumber}"`);
 
     const SUPABASE_BASE_URL = 'https://oexjbmllasslcxfqprlq.supabase.co';
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
-    const validateUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
+    const validateUrl = `https://${host}/api/telnyx-webhook?step=validate`;
+
+    // 2. Bulletproof Supabase Lookup with Strict 3-Second Timeout
+    async function getContractor(targetDigits) {
+      if (!targetDigits || !SUPABASE_KEY) return null;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+      try {
+        const response = await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients?select=*`, {
+          method: 'GET',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) return null;
+        const rows = await response.json();
+        if (!rows || rows.length === 0) return null;
+
+        return rows.find(r => {
+          const dbClean = String(r.contractor_phone || '').replace(/\D/g, '');
+          return dbClean === targetDigits || dbClean.endsWith(targetDigits) || targetDigits.endsWith(dbClean);
+        }) || null;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        console.error('[SUPABASE TIMEOUT/ERROR]', err);
+        return null;
+      }
+    }
 
     // ------------------------------------------------------------------
     // STEP 3: Route Final Call, Send Resend Email & Outbound Ring
@@ -57,33 +85,17 @@ export default async function handler(req, res) {
       let contractorEmail = null;
       let clientName = 'Contractor';
 
-      if (cleanDigits && SUPABASE_KEY) {
-        try {
-          const dbResponse = await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients?select=*`, {
-            method: 'GET',
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          if (dbResponse.ok) {
-            const rows = await dbResponse.json();
-            const match = rows.find(r => {
-              const dbClean = String(r.contractor_phone || '').replace(/\D/g, '');
-              return dbClean === cleanDigits || dbClean.endsWith(cleanDigits) || cleanDigits.endsWith(dbClean);
-            });
-            if (match) {
-              forwardNumber = match.forward_number || match.contractor_phone || null;
-              contractorEmail = match.email || null;
-              clientName = match.client_name || 'Contractor';
-            }
-          }
-        } catch (dbErr) {
-          console.error('[ROUTE DB ERROR]', dbErr);
-        }
+      const contractor = await getContractor(cleanDigits);
+      if (contractor) {
+        forwardNumber = contractor.forward_number || contractor.contractor_phone || null;
+        contractorEmail = contractor.email || null;
+        clientName = contractor.client_name || 'Contractor';
+        console.log(`[ROUTE] Matched Contractor: ${clientName} | Forward: ${forwardNumber} | Email: ${contractorEmail}`);
+      } else {
+        console.warn(`[ROUTE] No contractor match found for digits: ${cleanDigits}`);
       }
 
+      // Deliver Resend Email (Non-fatal)
       if (contractorEmail && contractorEmail !== 'null' && process.env.RESEND_API_KEY) {
         try {
           const resend = new Resend(process.env.RESEND_API_KEY);
@@ -105,11 +117,13 @@ export default async function handler(req, res) {
               </div>
             `
           });
+          console.log('[RESEND] Email sent successfully.');
         } catch (mailErr) {
           console.error('[RESEND ERROR]', mailErr);
         }
       }
 
+      // Telnyx Outbound Call (Non-fatal)
       if (forwardNumber && process.env.TELNYX_API_KEY) {
         try {
           const targetNumber = String(forwardNumber).split(',')[0].trim();
@@ -126,11 +140,12 @@ export default async function handler(req, res) {
               connection_id: process.env.TELNYX_CONNECTION_ID || '',
               to: cleanTo,
               from: cleanFrom,
-              webhook_url: `https://${hostHeader}/api/telnyx-webhook?step=outbound_alert`
+              webhook_url: `https://${host}/api/telnyx-webhook?step=outbound_alert`
             })
           });
+          console.log(`[TELNYX] Outbound call placed to ${cleanTo}`);
         } catch (outboundErr) {
-          console.error('[OUTBOUND ERROR]', outboundErr);
+          console.error('[TELNYX OUTBOUND ERROR]', outboundErr);
         }
       }
 
@@ -148,31 +163,13 @@ export default async function handler(req, res) {
       let contractorExists = false;
 
       if (cleanDigits.length >= 10 && SUPABASE_KEY) {
-        try {
-          const dbResponse = await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients?select=*`, {
-            method: 'GET',
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          if (dbResponse.ok) {
-            const rows = await dbResponse.json();
-            const match = rows.find(r => {
-              const dbClean = String(r.contractor_phone || '').replace(/\D/g, '');
-              return dbClean === cleanDigits || dbClean.endsWith(cleanDigits) || cleanDigits.endsWith(dbClean);
-            });
-            if (match) {
-              contractorExists = true;
-            }
-          }
-        } catch (err) {
-          console.error('[VALIDATE DB EXCEPTION]', err);
+        const contractor = await getContractor(cleanDigits);
+        if (contractor) {
+          contractorExists = true;
         }
       }
 
-      // If not found, replay gather prompt cleanly without throwing error
+      // If invalid/not found, present retry gather prompt cleanly
       if (!contractorExists) {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -184,7 +181,8 @@ export default async function handler(req, res) {
 </Response>`);
       }
 
-      const recordCallbackUrl = `https://${hostHeader}/api/telnyx-webhook?step=route&digits=${cleanDigits}`;
+      // Successful validation: Play legal disclosure and trigger recording with digits passed in query string
+      const recordCallbackUrl = `https://${host}/api/telnyx-webhook?step=route&digits=${cleanDigits}`;
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Please note, this emergency message will be recorded and dispatched to your contractor. Please summarize your situation after the beep, and press 7 when you are finished.</Say>
@@ -196,9 +194,10 @@ export default async function handler(req, res) {
     // ------------------------------------------------------------------
     // STEP 1: Initial Inbound Greeting
     // ------------------------------------------------------------------
+    const initialGatherUrl = `https://${host}/api/telnyx-webhook?step=validate`;
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather action="${validateUrl}" method="POST" numDigits="10" timeout="15">
+    <Gather action="${initialGatherUrl}" method="POST" numDigits="10" timeout="15">
         <Say voice="alice">Thank you for calling Heartland Dispatch emergency service. Please enter your contractor's 10-digit phone number on your keypad now.</Say>
     </Gather>
     <Say voice="alice">We did not receive any keypad input. Thank you for calling Heartland Dispatch. Goodbye.</Say>
