@@ -35,16 +35,11 @@ export default async function handler(req, res) {
     const enteredDigits = query.digits || query.Digits || body.Digits || body.digits || "";
     const cleanDigits = String(enteredDigits).replace(/\D/g, '');
 
+    console.log(`[HANDLER TRACE] Step: "${currentStep}" | Clean Digits: "${cleanDigits}"`);
+
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
     const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
-
-    // Helper to construct PostgREST query that checks both plain 10-digit and +1 prefixed numbers
-    const getSupabaseQueryUrl = (digits, selectFields) => {
-      const e164 = `+1${digits}`;
-      const filter = encodeURIComponent(`or=(contractor_phone.eq.${digits},contractor_phone.eq.${e164})`);
-      return `${SUPABASE_BASE_URL}/rest/v1/clients?select=${selectFields}&${filter}`;
-    };
 
     // ------------------------------------------------------------------
     // STEP 3: Route Final Call, Deliver Email & Outbound Ring
@@ -56,7 +51,8 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          const queryUrl = getSupabaseQueryUrl(cleanDigits, 'forward_number,email,client_name,contractor_phone');
+          // Direct OR query for 10-digit and +1 formats
+          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&or=(contractor_phone.eq.${cleanDigits},contractor_phone.eq.%2B1${cleanDigits})`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
@@ -73,9 +69,11 @@ export default async function handler(req, res) {
               contractorEmail = rows[0].email || null;
               clientName = rows[0].client_name || "Contractor";
             }
+          } else {
+            console.error('[ROUTE DB ERROR]', await dbResponse.text());
           }
         } catch (dbErr) {
-          console.error('DB Fetch Error during routing:', dbErr);
+          console.error('[ROUTE DB EXCEPTION]', dbErr);
         }
       }
 
@@ -101,7 +99,7 @@ export default async function handler(req, res) {
             `
           });
         } catch (mailErr) {
-          console.error('Resend Error:', mailErr);
+          console.error('[RESEND EXCEPTION]', mailErr);
         }
       }
 
@@ -125,7 +123,7 @@ export default async function handler(req, res) {
             })
           });
         } catch (outboundErr) {
-          console.error('Outbound Call Error:', outboundErr);
+          console.error('[OUTBOUND CALL EXCEPTION]', outboundErr);
         }
       }
 
@@ -137,14 +135,14 @@ export default async function handler(req, res) {
     }
 
     // ------------------------------------------------------------------
-    // STEP 2: Validate Digits & Prompt For Voice Recording (With Legal Notice)
+    // STEP 2: Validate Digits & Prompt For Voice Recording
     // ------------------------------------------------------------------
     if (currentStep === 'validate' || (cleanDigits.length >= 10 && currentStep !== 'record')) {
       let contractorExists = false;
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          const queryUrl = getSupabaseQueryUrl(cleanDigits, 'id');
+          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&or=(contractor_phone.eq.${cleanDigits},contractor_phone.eq.%2B1${cleanDigits})`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
@@ -159,9 +157,11 @@ export default async function handler(req, res) {
             if (rows && rows.length > 0) {
               contractorExists = true;
             }
+          } else {
+            console.error('[VALIDATE DB ERROR]', await dbResponse.text());
           }
         } catch (dbErr) {
-          console.error('Database Validation Error:', dbErr);
+          console.error('[VALIDATE DB EXCEPTION]', dbErr);
         }
       }
 
@@ -200,7 +200,7 @@ export default async function handler(req, res) {
 </Response>`);
 
   } catch (error) {
-    console.error('CRITICAL TOP-LEVEL WEBHOOK ERROR:', error);
+    console.error('[CRITICAL TOP-LEVEL WEBHOOK ERROR]', error);
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">An error occurred while processing your call. Please try again later.</Say>
