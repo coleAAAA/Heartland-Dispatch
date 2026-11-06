@@ -131,7 +131,7 @@ export default async function handler(req, res) {
     }
 
     // ------------------------------------------------------------------
-    // STEP 2: Validate Digits & Prompt For Voice Recording
+    // STEP 2: Validate Digits & Prompt For Voice Recording (With Legal Notice)
     // ------------------------------------------------------------------
     if (currentStep === 'validate' || (cleanDigits.length >= 10 && currentStep !== 'record')) {
       let contractorExists = false;
@@ -174,14 +174,14 @@ export default async function handler(req, res) {
       const recordCallbackUrl = `https://${hostHeader}/api/telnyx-webhook?step=route&digits=${cleanDigits}`;
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="alice">Thank you. Please summarize your emergency situation after the beep, and press 7 when you are finished.</Say>
+    <Say voice="alice">Please note, this emergency message will be recorded and dispatched to your contractor. Please summarize your situation after the beep, and press 7 when you are finished.</Say>
     <Record action="${recordCallbackUrl}" method="POST" maxLength="45" finishOnKey="7" playBeep="true" />
     <Say voice="alice">Processing your transmission.</Say>
 </Response>`);
     }
 
     // ------------------------------------------------------------------
-    // STEP 1: Initial Inbound Greeting (Runs immediately when dialed)
+    // STEP 1: Initial Inbound Greeting
     // ------------------------------------------------------------------
     const initialGatherUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
