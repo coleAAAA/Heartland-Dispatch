@@ -1,11 +1,9 @@
 import { Resend } from 'resend';
 
 export default async function handler(req, res) {
-  // Always return valid XML headers
   res.setHeader('Content-Type', 'text/xml');
 
   try {
-    // 1. Safe Body Parser (Handles both raw JSON and Form URL Encoded without triggering url.parse crashes)
     let body = {};
     if (typeof req.body === 'string') {
       try {
@@ -18,18 +16,15 @@ export default async function handler(req, res) {
       body = req.body;
     }
 
-    // Extract query or body parameters safely
     const query = req.query || {};
     const currentStep = query.step || body.step || '';
     
-    // Safely extract input parameters across Telnyx / TeXML fields
     const rawTo = body.To || body.to || body.data?.payload?.to || "";
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : "+16155550199");
     
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
     
-    // Extract entered digits from Telnyx payload or URL query string
     const enteredDigits = query.digits || body.Digits || body.digits || body.data?.payload?.digits || "";
     const cleanDigits = String(enteredDigits).replace(/\D/g, '');
 
@@ -46,7 +41,8 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=eq.${cleanDigits}`;
+          // Use ilike with % wildcards to match regardless of +1 or formatting
+          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=ilike.%${cleanDigits}`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
@@ -59,8 +55,8 @@ export default async function handler(req, res) {
           if (dbResponse.ok) {
             const rows = await dbResponse.json();
             if (rows && rows.length > 0) {
-              forwardNumber = rows[0].forward_number || rows[0].contractor_phone;
-              contractorEmail = rows[0].email;
+              forwardNumber = rows[0].forward_number || rows[0].contractor_phone || null;
+              contractorEmail = rows[0].email || null;
               clientName = rows[0].client_name || "Contractor";
             }
           }
@@ -69,8 +65,8 @@ export default async function handler(req, res) {
         }
       }
 
-      // 1. Non-blocking Email Alert via Resend
-      if (contractorEmail && process.env.RESEND_API_KEY) {
+      // Send Email Alert
+      if (contractorEmail && contractorEmail !== 'null' && process.env.RESEND_API_KEY) {
         try {
           const resend = new Resend(process.env.RESEND_API_KEY);
           resend.emails.send({
@@ -96,13 +92,14 @@ export default async function handler(req, res) {
         }
       }
 
-      // 2. Non-blocking Outbound Call via Telnyx Call Control API
+      // Trigger Outbound Call
       if (forwardNumber && process.env.TELNYX_API_KEY) {
         try {
           const targetNumber = String(forwardNumber).split(',')[0].trim();
           const cleanTo = targetNumber.startsWith('+') ? targetNumber : `+1${targetNumber}`;
           const cleanFrom = masterTelnyxNumber.length > 3 ? masterTelnyxNumber : "+16155550199";
 
+          const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
           fetch('https://api.telnyx.com/v2/calls', {
             method: 'POST',
             headers: {
@@ -113,7 +110,7 @@ export default async function handler(req, res) {
               connection_id: process.env.TELNYX_CONNECTION_ID || "",
               to: cleanTo,
               from: cleanFrom,
-              webhook_url: `https://${req.headers.host}/api/telnyx-webhook?step=outbound_alert`
+              webhook_url: `https://${hostHeader}/api/telnyx-webhook?step=outbound_alert`
             })
           }).catch(telnyxErr => console.error('Background Outbound Call Error:', telnyxErr));
         } catch (outboundErr) {
@@ -121,7 +118,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // Final reassurance message played to the caller before hanging up
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Our dispatch network has secured your emergency summary. Perfect! Our team will be with you as soon as possible. Goodbye.</Say>
@@ -135,10 +131,9 @@ export default async function handler(req, res) {
     if (currentStep === 'validate' || (cleanDigits.length >= 10 && currentStep !== 'record')) {
       let contractorExists = false;
 
-      // Verify if the entered 10 digits match a valid contractor in Supabase
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=eq.${cleanDigits}`;
+          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=ilike.%${cleanDigits}`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
@@ -159,9 +154,10 @@ export default async function handler(req, res) {
         }
       }
 
-      // IF NUMBER IS INVALID / UNMATCHED: Play polite retry message and loop back to Gather
+      const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
+
       if (!contractorExists) {
-        const retryGatherUrl = `https://${req.headers.host}/api/telnyx-webhook?step=validate`;
+        const retryGatherUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Gather action="${retryGatherUrl}" method="POST" numDigits="10" timeout="10">
@@ -172,8 +168,7 @@ export default async function handler(req, res) {
 </Response>`);
       }
 
-      // IF NUMBER IS VALID: Prompt for Emergency Voice Recording
-      const recordCallbackUrl = `https://${req.headers.host}/api/telnyx-webhook?step=route&digits=${cleanDigits}`;
+      const recordCallbackUrl = `https://${hostHeader}/api/telnyx-webhook?step=route&digits=${cleanDigits}`;
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Thank you. Please summarize your emergency situation after the beep, and press 7 when you are finished.</Say>
@@ -185,7 +180,9 @@ export default async function handler(req, res) {
     // ------------------------------------------------------------------
     // STEP 1: Initial Inbound Call Greeting & Gather Digits
     // ------------------------------------------------------------------
-    const initialGatherUrl = `https://${req.headers.host}/api/telnyx-webhook?step=validate`;
+    const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
+    const initialGatherUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
+
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Gather action="${initialGatherUrl}" method="POST" numDigits="10" timeout="15">
