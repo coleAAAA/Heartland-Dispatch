@@ -42,6 +42,20 @@ export default async function handler(req, res) {
     const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
     const validateUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
 
+    // Helper fetch with a strict 3-second timeout so Telnyx never times out
+    const fetchWithTimeout = async (url, options = {}, timeout = 3000) => {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
+      try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(id);
+        return response;
+      } catch (err) {
+        clearTimeout(id);
+        throw err;
+      }
+    };
+
     // ------------------------------------------------------------------
     // STEP 3: Route Final Call, Deliver Email & Outbound Ring
     // ------------------------------------------------------------------
@@ -52,16 +66,15 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          // Correct PostgREST wildcard syntax using asterisks (*)
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=ilike.*${cleanDigits}*`;
-          const dbResponse = await fetch(queryUrl, {
+          const dbResponse = await fetchWithTimeout(queryUrl, {
             method: 'GET',
             headers: {
               'apikey': SUPABASE_KEY,
               'Authorization': `Bearer ${SUPABASE_KEY}`,
               'Content-Type': 'application/json'
             }
-          });
+          }, 3000);
 
           if (dbResponse.ok) {
             const rows = await dbResponse.json();
@@ -70,11 +83,9 @@ export default async function handler(req, res) {
               contractorEmail = rows[0].email || null;
               clientName = rows[0].client_name || "Contractor";
             }
-          } else {
-            console.error('[ROUTE DB ERROR]', await dbResponse.text());
           }
         } catch (dbErr) {
-          console.error('[ROUTE DB EXCEPTION]', dbErr);
+          console.error('[ROUTE DB EXCEPTION / TIMEOUT]', dbErr);
         }
       }
 
@@ -144,14 +155,14 @@ export default async function handler(req, res) {
       if (cleanDigits.length >= 10 && SUPABASE_KEY) {
         try {
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=ilike.*${cleanDigits}*`;
-          const dbResponse = await fetch(queryUrl, {
+          const dbResponse = await fetchWithTimeout(queryUrl, {
             method: 'GET',
             headers: {
               'apikey': SUPABASE_KEY,
               'Authorization': `Bearer ${SUPABASE_KEY}`,
               'Content-Type': 'application/json'
             }
-          });
+          }, 3000);
 
           if (dbResponse.ok) {
             const rows = await dbResponse.json();
@@ -160,7 +171,7 @@ export default async function handler(req, res) {
             }
           }
         } catch (dbErr) {
-          console.error('[VALIDATE DB EXCEPTION]', dbErr);
+          console.error('[VALIDATE DB EXCEPTION / TIMEOUT]', dbErr);
         }
       }
 
