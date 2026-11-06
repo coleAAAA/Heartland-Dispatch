@@ -1,7 +1,6 @@
 import { Resend } from 'resend';
 
 export default async function handler(req, res) {
-  // ALWAYS set XML header first so Telnyx TeXML never chokes on responses
   res.setHeader('Content-Type', 'text/xml');
 
   try {
@@ -40,6 +39,13 @@ export default async function handler(req, res) {
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
     const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
 
+    // Helper to construct PostgREST query that checks both plain 10-digit and +1 prefixed numbers
+    const getSupabaseQueryUrl = (digits, selectFields) => {
+      const e164 = `+1${digits}`;
+      const filter = encodeURIComponent(`or=(contractor_phone.eq.${digits},contractor_phone.eq.${e164})`);
+      return `${SUPABASE_BASE_URL}/rest/v1/clients?select=${selectFields}&${filter}`;
+    };
+
     // ------------------------------------------------------------------
     // STEP 3: Route Final Call, Deliver Email & Outbound Ring
     // ------------------------------------------------------------------
@@ -50,7 +56,7 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=like.*${cleanDigits}*`;
+          const queryUrl = getSupabaseQueryUrl(cleanDigits, 'forward_number,email,client_name,contractor_phone');
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
@@ -138,7 +144,7 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=like.*${cleanDigits}*`;
+          const queryUrl = getSupabaseQueryUrl(cleanDigits, 'id');
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
             headers: {
