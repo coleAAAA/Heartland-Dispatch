@@ -32,6 +32,7 @@ export default async function handler(req, res) {
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : "+16155550199");
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
 
+    // Pull digits from query or body fallback
     const enteredDigits = query.digits || query.Digits || body.Digits || body.digits || "";
     const cleanDigits = String(enteredDigits).replace(/\D/g, '');
 
@@ -51,7 +52,6 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          // Direct OR query for 10-digit and +1 formats
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&or=(contractor_phone.eq.${cleanDigits},contractor_phone.eq.%2B1${cleanDigits})`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
@@ -69,8 +69,6 @@ export default async function handler(req, res) {
               contractorEmail = rows[0].email || null;
               clientName = rows[0].client_name || "Contractor";
             }
-          } else {
-            console.error('[ROUTE DB ERROR]', await dbResponse.text());
           }
         } catch (dbErr) {
           console.error('[ROUTE DB EXCEPTION]', dbErr);
@@ -157,8 +155,6 @@ export default async function handler(req, res) {
             if (rows && rows.length > 0) {
               contractorExists = true;
             }
-          } else {
-            console.error('[VALIDATE DB ERROR]', await dbResponse.text());
           }
         } catch (dbErr) {
           console.error('[VALIDATE DB EXCEPTION]', dbErr);
@@ -177,6 +173,7 @@ export default async function handler(req, res) {
 </Response>`);
       }
 
+      // FIXED: Passed cleanDigits forward into the record action callback URL
       const recordCallbackUrl = `https://${hostHeader}/api/telnyx-webhook?step=route&digits=${cleanDigits}`;
       return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
