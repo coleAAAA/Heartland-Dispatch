@@ -4,35 +4,44 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'text/xml');
 
   try {
+    // 1. Bulletproof Vercel Body Parser (Handles Buffers, Form-URLEncoded strings, and JSON)
     let body = {};
-    if (typeof req.body === 'string') {
+    let rawBody = req.body;
+
+    if (Buffer.isBuffer(rawBody)) {
+      rawBody = rawBody.toString('utf8');
+    }
+
+    if (typeof rawBody === 'string') {
       try {
-        body = JSON.parse(req.body);
+        body = JSON.parse(rawBody);
       } catch (e) {
-        const params = new URLSearchParams(req.body);
-        body = Object.fromEntries(params.entries());
+        try {
+          const params = new URLSearchParams(rawBody);
+          body = Object.fromEntries(params.entries());
+        } catch (err) {
+          body = {};
+        }
       }
-    } else if (req.body && typeof req.body === 'object') {
-      body = req.body;
+    } else if (rawBody && typeof rawBody === 'object') {
+      body = rawBody;
     }
 
     const query = req.query || {};
     const currentStep = query.step || body.step || '';
-    
-    // Log incoming state for debugging
-    console.log("WEBHOOK CURRENT STEP:", currentStep);
-    console.log("WEBHOOK BODY KEYS:", Object.keys(body));
+
+    console.log("PARSED QUERY:", JSON.stringify(query));
+    console.log("PARSED BODY:", JSON.stringify(body));
 
     const rawTo = body.To || body.to || body.data?.payload?.to || "";
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : "+16155550199");
-    
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
-    
-    // Robust multi-source digit extraction
-    const enteredDigits = query.digits || body.Digits || body.digits || body.payload?.digits || body.data?.payload?.digits || "";
+
+    // 2. Extract Digits from Telnyx TeXML Form Post
+    const enteredDigits = query.digits || query.Digits || body.Digits || body.digits || "";
     const cleanDigits = String(enteredDigits).replace(/\D/g, '');
-    
+
     console.log("EXTRACTED DIGITS:", enteredDigits, "-> CLEAN 10-DIGITS:", cleanDigits);
 
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
@@ -48,6 +57,7 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
+          // ilike wildcard matches whether stored as 5625089424 or +15625089424
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=ilike.%${cleanDigits}`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
@@ -71,7 +81,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // Send Email Alert
+      // Send Email Alert via Resend
       if (contractorEmail && contractorEmail !== 'null' && process.env.RESEND_API_KEY) {
         try {
           const resend = new Resend(process.env.RESEND_API_KEY);
@@ -98,7 +108,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // Trigger Outbound Call
+      // Trigger Outbound Call to Contractor
       if (forwardNumber && process.env.TELNYX_API_KEY) {
         try {
           const targetNumber = String(forwardNumber).split(',')[0].trim();
@@ -137,8 +147,6 @@ export default async function handler(req, res) {
     if (currentStep === 'validate' || (cleanDigits.length >= 10 && currentStep !== 'record')) {
       let contractorExists = false;
 
-      console.log("VALIDATING CLEAN DIGITS IN SUPABASE:", cleanDigits);
-
       if (cleanDigits && SUPABASE_KEY) {
         try {
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=ilike.%${cleanDigits}`;
@@ -153,7 +161,6 @@ export default async function handler(req, res) {
 
           if (dbResponse.ok) {
             const rows = await dbResponse.json();
-            console.log("SUPABASE VALIDATION ROWS FOUND:", rows.length);
             if (rows && rows.length > 0) {
               contractorExists = true;
             }
