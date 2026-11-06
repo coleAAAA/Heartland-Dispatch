@@ -1,32 +1,39 @@
 import { Resend } from 'resend';
 
 export default async function handler(req, res) {
-  // Always ensure XML header is sent first
-  res.setHeader('Content-Type', 'text/xml');
-
   try {
-    // 1. Safe Body Parser
     let body = {};
-    try {
-      let rawBody = req.body;
-      if (Buffer.isBuffer(rawBody)) rawBody = rawBody.toString('utf8');
-      
-      if (typeof rawBody === 'string') {
+    let rawBody = req.body;
+
+    if (Buffer.isBuffer(rawBody)) rawBody = rawBody.toString('utf8');
+    
+    if (typeof rawBody === 'string') {
+      try {
+        body = JSON.parse(rawBody);
+      } catch (e) {
         try {
-          body = JSON.parse(rawBody);
-        } catch (e) {
           const params = new URLSearchParams(rawBody);
           body = Object.fromEntries(params.entries());
+        } catch (err) {
+          body = {};
         }
-      } else if (rawBody && typeof rawBody === 'object') {
-        body = rawBody;
       }
-    } catch (parseErr) {
-      console.error('Body Parse Error:', parseErr);
+    } else if (rawBody && typeof rawBody === 'object') {
+      body = rawBody;
     }
 
     const query = req.query || {};
     const currentStep = query.step || body.step || '';
+
+    // CRITICAL FIX: If this is a background Telnyx status/event callback with no user action or step, 
+    // respond with plain 200 OK instead of returning XML markup.
+    if ((body.CallStatus || body.AnsweredTime || body.CallInitiatedAt || body.CallDuration) && !currentStep && !body.Digits && !body.digits && !body.RecordingUrl) {
+      console.log("Ignoring background status event callback.");
+      return res.status(200).send('OK');
+    }
+
+    // Always ensure XML header is sent for active TeXML voice flows
+    res.setHeader('Content-Type', 'text/xml');
 
     const rawTo = body.To || body.to || body.data?.payload?.to || "";
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
@@ -48,7 +55,6 @@ export default async function handler(req, res) {
       let contractorEmail = null;
       let clientName = "Contractor";
 
-      // Database Lookup (Safely isolated)
       if (cleanDigits && SUPABASE_KEY) {
         try {
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=like.*${cleanDigits}*`;
@@ -74,7 +80,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // Email Dispatch (Safely isolated)
       if (contractorEmail && contractorEmail !== 'null' && process.env.RESEND_API_KEY) {
         try {
           const resend = new Resend(process.env.RESEND_API_KEY);
@@ -101,7 +106,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // Outbound Call Trigger (Safely isolated)
       if (forwardNumber && process.env.TELNYX_API_KEY) {
         try {
           const targetNumber = String(forwardNumber).split(',')[0].trim();
@@ -198,6 +202,7 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('CRITICAL TOP-LEVEL WEBHOOK ERROR:', error);
+    res.setHeader('Content-Type', 'text/xml');
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">An error occurred while processing your call. Please try again later.</Say>
