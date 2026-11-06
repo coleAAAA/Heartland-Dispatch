@@ -1,94 +1,82 @@
 import { Resend } from 'resend';
+import querystring from 'querystring';
 
 export default async function handler(req, res) {
+  // Always set XML header first so Telnyx never throws an application error
   res.setHeader('Content-Type', 'text/xml');
 
   try {
+    // ------------------------------------------------------------------
+    // SAFE BODY PARSING (Fixes form-urlencoded crash on Vercel)
+    // ------------------------------------------------------------------
     let body = {};
-    let rawBody = req.body;
-
-    if (Buffer.isBuffer(rawBody)) rawBody = rawBody.toString('utf8');
-    
-    if (typeof rawBody === 'string') {
-      try {
-        body = JSON.parse(rawBody);
-      } catch (e) {
-        try {
-          const params = new URLSearchParams(rawBody);
-          body = Object.fromEntries(params.entries());
-        } catch (err) {
-          body = {};
-        }
+    if (req.body) {
+      if (typeof req.body === 'string') {
+        body = querystring.parse(req.body);
+      } else if (Buffer.isBuffer(req.body)) {
+        body = querystring.parse(req.body.toString('utf8'));
+      } else if (typeof req.body === 'object') {
+        body = req.body;
       }
-    } else if (rawBody && typeof rawBody === 'object') {
-      body = rawBody;
     }
 
     const query = req.query || {};
     const currentStep = query.step || body.step || '';
 
-    const rawTo = body.To || body.to || body.data?.payload?.to || "";
-    const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
-    const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : "+16155550199");
-    const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
+    const rawTo = body.To || body.to || '';
+    const callerNumber = body.From || body.from || 'Unknown Caller';
+    const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : '+16155550199');
+    const recordingUrl = body.RecordingUrl || body.recording_url || '';
 
-    const enteredDigits = query.digits || query.Digits || body.Digits || body.digits || "";
-    const cleanDigits = String(enteredDigits).replace(/\D/g, '');
+    // Extract keypad input
+    const rawDigits = query.digits || body.Digits || body.digits || '';
+    const cleanDigits = String(rawDigits).replace(/\D/g, '');
 
-    console.log(`[HANDLER TRACE] Step: "${currentStep}" | Clean Digits: "${cleanDigits}"`);
+    console.log(`[TELNYX WEBHOOK] Step: "${currentStep}" | Keypad Digits: "${cleanDigits}"`);
 
-    const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
+    const SUPABASE_BASE_URL = 'https://oexjbmllasslcxfqprlq.supabase.co';
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
     const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
     const validateUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
 
-    // Helper fetch with a strict 3-second timeout so Telnyx never times out
-    const fetchWithTimeout = async (url, options = {}, timeout = 3000) => {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeout);
-      try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
-        clearTimeout(id);
-        return response;
-      } catch (err) {
-        clearTimeout(id);
-        throw err;
-      }
-    };
-
     // ------------------------------------------------------------------
-    // STEP 3: Route Final Call, Deliver Email & Outbound Ring
+    // STEP 3: Route Final Call, Send Resend Email & Outbound Ring
     // ------------------------------------------------------------------
     if (currentStep === 'route') {
       let forwardNumber = null;
       let contractorEmail = null;
-      let clientName = "Contractor";
+      let clientName = 'Contractor';
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=ilike.*${cleanDigits}*`;
-          const dbResponse = await fetchWithTimeout(queryUrl, {
+          // Exact match on 10 digits OR +1 formatted digits without URL syntax errors
+          const filterParam = encodeURIComponent(`or=(contractor_phone.eq.${cleanDigits},contractor_phone.eq.+1${cleanDigits})`);
+          const dbUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&${filterParam}`;
+          
+          const dbResponse = await fetch(dbUrl, {
             method: 'GET',
             headers: {
               'apikey': SUPABASE_KEY,
               'Authorization': `Bearer ${SUPABASE_KEY}`,
               'Content-Type': 'application/json'
             }
-          }, 3000);
+          });
 
           if (dbResponse.ok) {
             const rows = await dbResponse.json();
             if (rows && rows.length > 0) {
               forwardNumber = rows[0].forward_number || rows[0].contractor_phone || null;
               contractorEmail = rows[0].email || null;
-              clientName = rows[0].client_name || "Contractor";
+              clientName = rows[0].client_name || 'Contractor';
+              console.log(`[DB MATCH SUCCESS] Client: ${clientName} | Forward: ${forwardNumber} | Email: ${contractorEmail}`);
             }
           }
         } catch (dbErr) {
-          console.error('[ROUTE DB EXCEPTION / TIMEOUT]', dbErr);
+          console.error('[ROUTE DB ERROR]', dbErr);
         }
       }
 
+      // Send Resend Email Alert
       if (contractorEmail && contractorEmail !== 'null' && process.env.RESEND_API_KEY) {
         try {
           const resend = new Resend(process.env.RESEND_API_KEY);
@@ -110,16 +98,18 @@ export default async function handler(req, res) {
               </div>
             `
           });
+          console.log('[RESEND EMAIL SENT]');
         } catch (mailErr) {
-          console.error('[RESEND EXCEPTION]', mailErr);
+          console.error('[RESEND ERROR]', mailErr);
         }
       }
 
+      // Outbound Call Forwarding via Telnyx Call Control API
       if (forwardNumber && process.env.TELNYX_API_KEY) {
         try {
           const targetNumber = String(forwardNumber).split(',')[0].trim();
           const cleanTo = targetNumber.startsWith('+') ? targetNumber : `+1${targetNumber}`;
-          const cleanFrom = masterTelnyxNumber.length > 3 ? masterTelnyxNumber : "+16155550199";
+          const cleanFrom = masterTelnyxNumber.length > 3 ? masterTelnyxNumber : '+16155550199';
 
           await fetch('https://api.telnyx.com/v2/calls', {
             method: 'POST',
@@ -128,14 +118,15 @@ export default async function handler(req, res) {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              connection_id: process.env.TELNYX_CONNECTION_ID || "",
+              connection_id: process.env.TELNYX_CONNECTION_ID || '',
               to: cleanTo,
               from: cleanFrom,
               webhook_url: `https://${hostHeader}/api/telnyx-webhook?step=outbound_alert`
             })
           });
+          console.log(`[OUTBOUND CALL DIALED] Target: ${cleanTo}`);
         } catch (outboundErr) {
-          console.error('[OUTBOUND CALL EXCEPTION]', outboundErr);
+          console.error('[OUTBOUND DIAL ERROR]', outboundErr);
         }
       }
 
@@ -154,15 +145,17 @@ export default async function handler(req, res) {
 
       if (cleanDigits.length >= 10 && SUPABASE_KEY) {
         try {
-          const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=ilike.*${cleanDigits}*`;
-          const dbResponse = await fetchWithTimeout(queryUrl, {
+          const filterParam = encodeURIComponent(`or=(contractor_phone.eq.${cleanDigits},contractor_phone.eq.+1${cleanDigits})`);
+          const dbUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&${filterParam}`;
+
+          const dbResponse = await fetch(dbUrl, {
             method: 'GET',
             headers: {
               'apikey': SUPABASE_KEY,
               'Authorization': `Bearer ${SUPABASE_KEY}`,
               'Content-Type': 'application/json'
             }
-          }, 3000);
+          });
 
           if (dbResponse.ok) {
             const rows = await dbResponse.json();
@@ -171,10 +164,11 @@ export default async function handler(req, res) {
             }
           }
         } catch (dbErr) {
-          console.error('[VALIDATE DB EXCEPTION / TIMEOUT]', dbErr);
+          console.error('[VALIDATE DB ERROR]', dbErr);
         }
       }
 
+      // If contractor not found, present fresh Gather prompt to re-enter
       if (!contractorExists) {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -208,7 +202,7 @@ export default async function handler(req, res) {
 </Response>`);
 
   } catch (error) {
-    console.error('[CRITICAL TOP-LEVEL WEBHOOK ERROR]', error);
+    console.error('[CRITICAL WEBHOOK CRASH]', error);
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">An error occurred while processing your call. Please try again later.</Say>
