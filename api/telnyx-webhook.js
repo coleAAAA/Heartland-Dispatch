@@ -42,77 +42,12 @@ export default async function handler(req, res) {
     const rawDigits = merged.digits || merged.Digits || merged.DIGITS || '';
     const cleanDigits = String(rawDigits).replace(/\D/g, '');
 
-    console.log(`[PIPELINE DEBUG] Step: "${currentStep}" | Digits: "${cleanDigits}"`);
+    console.log(`[KEYPAD PIPELINE] Step: "${currentStep}" | Digits: "${cleanDigits}"`);
 
     const SUPABASE_BASE_URL = 'https://oexjbmllasslcxfqprlq.supabase.co';
-    // Check multiple common Vercel variable naming conventions
-    const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
-    
-    console.log(`[SUPABASE CONFIG] URL exists: ${!!SUPABASE_BASE_URL} | Key length: ${SUPABASE_KEY ? SUPABASE_KEY.length : 'MISSING'}`);
-
+    const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
     const hostHeader = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
     const validateUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
-
-    // Intelligent JavaScript-side matching with explicit debug logs
-    async function smartFindContractor(enteredDigits) {
-      if (!enteredDigits) {
-        console.log('[SMART FIND] No digits provided to search.');
-        return null;
-      }
-      if (!SUPABASE_KEY) {
-        console.error('[SMART FIND ERROR] SUPABASE_KEY is missing in environment variables!');
-        return null;
-      }
-
-      try {
-        const fetchUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=*`;
-        console.log(`[SMART FIND] Fetching from Supabase: ${fetchUrl}`);
-
-        const dbResponse = await fetch(fetchUrl, {
-          method: 'GET',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        console.log(`[SMART FIND] Supabase Response Status: ${dbResponse.status}`);
-
-        if (!dbResponse.ok) {
-          const errText = await dbResponse.text();
-          console.error('[SMART FIND] Supabase Error Body:', errText);
-          return null;
-        }
-
-        const rows = await dbResponse.json();
-        console.log(`[SMART FIND] Fetched ${rows ? rows.length : 0} rows from clients table.`);
-
-        if (!rows || rows.length === 0) return null;
-
-        // Log available contractor phones for debugging comparison
-        rows.forEach((r, idx) => {
-          console.log(`[DB ROW ${idx}] contractor_phone: "${r.contractor_phone}" | cleaned: "${String(r.contractor_phone || '').replace(/\D/g, '')}"`);
-        });
-
-        // Match where cleaned database phone matches entered digits
-        const match = rows.find(r => {
-          const dbClean = String(r.contractor_phone || '').replace(/\D/g, '');
-          return dbClean === enteredDigits || dbClean.endsWith(enteredDigits) || enteredDigits.endsWith(dbClean) || dbClean.includes(enteredDigits);
-        });
-
-        if (match) {
-          console.log('[SMART FIND] MATCH FOUND!', match.client_name);
-        } else {
-          console.warn('[SMART FIND] NO MATCH found for entered digits:', enteredDigits);
-        }
-
-        return match || null;
-      } catch (err) {
-        console.error('[SMART FIND EXCEPTION]', err);
-        return null;
-      }
-    }
 
     // ------------------------------------------------------------------
     // STEP 3: Route Final Call, Send Resend Email & Outbound Ring
@@ -122,11 +57,31 @@ export default async function handler(req, res) {
       let contractorEmail = null;
       let clientName = 'Contractor';
 
-      const contractor = await smartFindContractor(cleanDigits);
-      if (contractor) {
-        forwardNumber = contractor.forward_number || contractor.contractor_phone || null;
-        contractorEmail = contractor.email || null;
-        clientName = contractor.client_name || 'Contractor';
+      if (cleanDigits && SUPABASE_KEY) {
+        try {
+          const dbResponse = await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients?select=*`, {
+            method: 'GET',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          if (dbResponse.ok) {
+            const rows = await dbResponse.json();
+            const match = rows.find(r => {
+              const dbClean = String(r.contractor_phone || '').replace(/\D/g, '');
+              return dbClean === cleanDigits || dbClean.endsWith(cleanDigits) || cleanDigits.endsWith(dbClean);
+            });
+            if (match) {
+              forwardNumber = match.forward_number || match.contractor_phone || null;
+              contractorEmail = match.email || null;
+              clientName = match.client_name || 'Contractor';
+            }
+          }
+        } catch (dbErr) {
+          console.error('[ROUTE DB ERROR]', dbErr);
+        }
       }
 
       if (contractorEmail && contractorEmail !== 'null' && process.env.RESEND_API_KEY) {
@@ -192,13 +147,32 @@ export default async function handler(req, res) {
     if (currentStep === 'validate' || (cleanDigits.length > 0 && currentStep !== 'record')) {
       let contractorExists = false;
 
-      if (cleanDigits.length >= 10) {
-        const contractor = await smartFindContractor(cleanDigits);
-        if (contractor) {
-          contractorExists = true;
+      if (cleanDigits.length >= 10 && SUPABASE_KEY) {
+        try {
+          const dbResponse = await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients?select=*`, {
+            method: 'GET',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          if (dbResponse.ok) {
+            const rows = await dbResponse.json();
+            const match = rows.find(r => {
+              const dbClean = String(r.contractor_phone || '').replace(/\D/g, '');
+              return dbClean === cleanDigits || dbClean.endsWith(cleanDigits) || cleanDigits.endsWith(dbClean);
+            });
+            if (match) {
+              contractorExists = true;
+            }
+          }
+        } catch (err) {
+          console.error('[VALIDATE DB EXCEPTION]', err);
         }
       }
 
+      // If not found, replay gather prompt cleanly without throwing error
       if (!contractorExists) {
         return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -211,7 +185,7 @@ export default async function handler(req, res) {
       }
 
       const recordCallbackUrl = `https://${hostHeader}/api/telnyx-webhook?step=route&digits=${cleanDigits}`;
-      return res.status(200->send(`<?xml version="1.0" encoding="UTF-8"?>
+      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">Please note, this emergency message will be recorded and dispatched to your contractor. Please summarize your situation after the beep, and press 7 when you are finished.</Say>
     <Record action="${recordCallbackUrl}" method="POST" maxLength="45" finishOnKey="7" playBeep="true" />
