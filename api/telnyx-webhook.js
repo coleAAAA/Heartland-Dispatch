@@ -19,14 +19,21 @@ export default async function handler(req, res) {
     const query = req.query || {};
     const currentStep = query.step || body.step || '';
     
+    // Log incoming state for debugging
+    console.log("WEBHOOK CURRENT STEP:", currentStep);
+    console.log("WEBHOOK BODY KEYS:", Object.keys(body));
+
     const rawTo = body.To || body.to || body.data?.payload?.to || "";
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
     const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : "+16155550199");
     
     const recordingUrl = body.RecordingUrl || body.recording_url || body.data?.payload?.recording_url || body.data?.payload?.recording_urls?.mp3 || "";
     
-    const enteredDigits = query.digits || body.Digits || body.digits || body.data?.payload?.digits || "";
+    // Robust multi-source digit extraction
+    const enteredDigits = query.digits || body.Digits || body.digits || body.payload?.digits || body.data?.payload?.digits || "";
     const cleanDigits = String(enteredDigits).replace(/\D/g, '');
+    
+    console.log("EXTRACTED DIGITS:", enteredDigits, "-> CLEAN 10-DIGITS:", cleanDigits);
 
     const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
     const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -41,7 +48,6 @@ export default async function handler(req, res) {
 
       if (cleanDigits && SUPABASE_KEY) {
         try {
-          // Use ilike with % wildcards to match regardless of +1 or formatting
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=forward_number,email,client_name,contractor_phone&contractor_phone=ilike.%${cleanDigits}`;
           const dbResponse = await fetch(queryUrl, {
             method: 'GET',
@@ -131,6 +137,8 @@ export default async function handler(req, res) {
     if (currentStep === 'validate' || (cleanDigits.length >= 10 && currentStep !== 'record')) {
       let contractorExists = false;
 
+      console.log("VALIDATING CLEAN DIGITS IN SUPABASE:", cleanDigits);
+
       if (cleanDigits && SUPABASE_KEY) {
         try {
           const queryUrl = `${SUPABASE_BASE_URL}/rest/v1/clients?select=id&contractor_phone=ilike.%${cleanDigits}`;
@@ -145,6 +153,7 @@ export default async function handler(req, res) {
 
           if (dbResponse.ok) {
             const rows = await dbResponse.json();
+            console.log("SUPABASE VALIDATION ROWS FOUND:", rows.length);
             if (rows && rows.length > 0) {
               contractorExists = true;
             }
