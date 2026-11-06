@@ -1,6 +1,9 @@
 import { Resend } from 'resend';
 
 export default async function handler(req, res) {
+  // ALWAYS set XML header first so Telnyx TeXML never chokes on responses
+  res.setHeader('Content-Type', 'text/xml');
+
   try {
     let body = {};
     let rawBody = req.body;
@@ -24,16 +27,6 @@ export default async function handler(req, res) {
 
     const query = req.query || {};
     const currentStep = query.step || body.step || '';
-
-    // CRITICAL FIX: If this is a background Telnyx status/event callback with no user action or step, 
-    // respond with plain 200 OK instead of returning XML markup.
-    if ((body.CallStatus || body.AnsweredTime || body.CallInitiatedAt || body.CallDuration) && !currentStep && !body.Digits && !body.digits && !body.RecordingUrl) {
-      console.log("Ignoring background status event callback.");
-      return res.status(200).send('OK');
-    }
-
-    // Always ensure XML header is sent for active TeXML voice flows
-    res.setHeader('Content-Type', 'text/xml');
 
     const rawTo = body.To || body.to || body.data?.payload?.to || "";
     const callerNumber = body.From || body.from || body.data?.payload?.from || "Unknown Caller";
@@ -188,7 +181,7 @@ export default async function handler(req, res) {
     }
 
     // ------------------------------------------------------------------
-    // STEP 1: Initial Inbound Greeting
+    // STEP 1: Initial Inbound Greeting (Runs immediately when dialed)
     // ------------------------------------------------------------------
     const initialGatherUrl = `https://${hostHeader}/api/telnyx-webhook?step=validate`;
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
@@ -202,7 +195,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('CRITICAL TOP-LEVEL WEBHOOK ERROR:', error);
-    res.setHeader('Content-Type', 'text/xml');
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">An error occurred while processing your call. Please try again later.</Say>
