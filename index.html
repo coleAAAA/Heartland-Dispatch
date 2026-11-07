@@ -1,323 +1,465 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="no-js">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Heartland Dispatch | Automated Missed-Call Voice Routing</title>
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Google Fonts: Inter -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Heartland Dispatch | Never lose an emergency call to voicemail</title>
+  <meta name="description" content="When you can't pick up, customers call one number, leave a message, and you get a phone call and an email with the recording. $250/month, 10-day free trial, no contract.">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta property="og:title" content="Heartland Dispatch: never lose an emergency call to voicemail">
+  <meta property="og:description" content="Customers leave a message. You get a phone call and an email with the recording. 10-day free trial.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0a0a'/%3E%3Cpath d='M9 8v16M23 8v16M9 16h14' stroke='white' stroke-width='3.5' fill='none'/%3E%3C/svg%3E">
+  <script>document.documentElement.className = 'js';</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    body {
-      font-family: 'Inter', sans-serif;
-      background-color: #ffffff;
-      color: #000000;
-    }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="min-h-screen flex flex-col justify-between selection:bg-black selection:text-white antialiased">
+<body>
+  <a class="skip" href="#main">Skip to content</a>
 
-  <!-- Header / Navigation -->
-  <header class="w-full border-b border-gray-200 px-6 py-6 md:px-12">
-    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-      <div class="text-center md:text-left">
-        <h1 class="text-2xl font-bold tracking-tight uppercase">Heartland Dispatch</h1>
-        <p class="text-xs tracking-widest text-gray-500 font-semibold uppercase mt-1">HVAC / CONTRACTOR HELP</p>
-      </div>
-      <nav class="flex items-center gap-6 text-sm font-medium">
-        <a href="#how-it-works" class="hover:underline underline-offset-4 decoration-1">How It Works</a>
-        <a href="#demo" class="hover:underline underline-offset-4 decoration-1">Live Demo</a>
-        <a href="#pricing" class="hover:underline underline-offset-4 decoration-1">Pricing</a>
-        <button onclick="openModal()" class="border border-black bg-black text-white px-4 py-2 text-xs uppercase tracking-wider hover:bg-white hover:text-black transition-colors duration-200">
-          Start 10-Day Trial
-        </button>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="/">Heartland Dispatch</a>
+      <nav class="nav" aria-label="Main">
+        <a class="nav-link" href="#how">How it works</a>
+        <a class="nav-link" href="#demo">See a call</a>
+        <a class="nav-link" href="#pricing">Pricing</a>
+        <a class="nav-link" href="#faq">FAQ</a>
+        <button type="button" class="btn btn-sm" data-open-signup>Start free trial</button>
       </nav>
     </div>
   </header>
 
-  <!-- Hero Section -->
-  <main class="flex-1 max-w-6xl w-full mx-auto px-6 py-16 md:py-24">
-    <div class="max-w-3xl">
-      <span class="inline-block px-3 py-1 text-xs font-mono border border-black uppercase tracking-widest mb-6">
-        Never Miss A High-Value Job
-      </span>
-      <h2 class="text-4xl md:text-6xl font-extrabold tracking-tight leading-none mb-6">
-        Turn missed phone calls into $1,000+ booked jobs. Automatically.
-      </h2>
-      <p class="text-lg md:text-xl text-gray-600 mb-8 font-normal leading-relaxed">
-        When an emergency call goes unanswered, Heartland Dispatch answers instantly, captures the customer's description, routes the live call to your on-duty team, and emails an immediate alert. <strong>Capturing just one extra job per month pays for itself 4x over.</strong>
-      </p>
-      
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 mb-16">
-        <button onclick="openModal()" class="bg-black text-white px-8 py-4 text-sm font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-all">
-          Start 10-Day Free Trial
-        </button>
-        <a href="#demo" class="px-8 py-4 text-sm font-semibold uppercase tracking-wider border border-gray-300 text-center hover:border-black transition-colors">
-          View Demo
-        </a>
-      </div>
+  <main id="main">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="wrap">
+        <p class="eyebrow">For HVAC, plumbing, electrical &amp; other trades</p>
+        <h1 class="display">Never lose an emergency call to voicemail.</h1>
+        <p class="lead">When you can't pick up, your voicemail sends the customer to one number. They leave a message, and <strong>you get a phone call and an email with the recording</strong>, so you can call them back before they call your competitor.</p>
+        <div class="cta-row">
+          <button type="button" class="btn" id="heroCta" data-open-signup>Start 10-day free trial</button>
+          <a class="btn btn-ghost" href="#demo">See a call, start to finish</a>
+        </div>
+        <p class="cta-note">Card required, not charged for 10 days. No contract. Cancel anytime by email.</p>
 
-      <!-- Quick Metrics Bar -->
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-6 pt-8 border-t border-gray-200 text-left">
-        <div>
-          <p class="text-2xl md:text-3xl font-bold">24/7</p>
-          <p class="text-xs text-gray-500 uppercase tracking-wider mt-1">Instant Voice Response</p>
-        </div>
-        <div>
-          <p class="text-2xl md:text-3xl font-bold">$250<span class="text-sm font-normal text-gray-500">/mo</span></p>
-          <p class="text-xs text-gray-500 uppercase tracking-wider mt-1">Flat Rate (1 Job Covers It)</p>
-        </div>
-        <div class="col-span-2 md:col-span-1">
-          <p class="text-2xl md:text-3xl font-bold">2-4 Jobs</p>
-          <p class="text-xs text-gray-500 uppercase tracking-wider mt-1">Avg. Saved Week 1</p>
+        <div class="proof" role="list">
+          <div role="listitem"><b>Phone + email</b><span>For each message left</span></div>
+          <div role="listitem"><b>Up to 6 phones</b><span>Ring at the same time</span></div>
+          <div role="listitem"><b>$250/mo</b><span>Flat. No per-call fees</span></div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- Live Interactive Demo Box -->
-    <section id="demo" class="mt-20 pt-12 border-t border-gray-200">
-      <div class="mb-8">
-        <h3 class="text-xs font-mono uppercase tracking-widest text-gray-500 mb-2">[ Interactive Prototype Demo ]</h3>
-        <h4 class="text-2xl font-bold">See How The Missed-Call Workflow Operates</h4>
-      </div>
+    <!-- How it works -->
+    <section class="section" id="how" aria-labelledby="how-title">
+      <div class="wrap">
+        <p class="section-label">How it works</p>
+        <h2 class="title" id="how-title">Set up in two minutes. Nothing to install.</h2>
+        <p class="sub">You keep your phone number. You add one sentence to your voicemail greeting and your website. That's the whole setup.</p>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-        <!-- Phone Simulator UI -->
-        <div class="border border-black p-6 bg-gray-50">
-          <div class="flex justify-between items-center border-b border-gray-200 pb-3 mb-4">
-            <span class="text-xs font-mono text-gray-500">AUTOMATED VOICE ROUTER</span>
-            <span class="inline-block w-2 h-2 rounded-full bg-black"></span>
-          </div>
-          
-          <div id="chatWindow" class="space-y-4 text-sm mb-6 min-h-[180px] flex flex-col justify-end">
-            <div class="bg-gray-200 text-gray-700 p-3 rounded-md text-xs font-mono max-w-[85%] self-start">
-              [System]: Call incoming to HVAC Line (+1 615-288-9925)... <br>
-              Status: Unanswered / Busy
-            </div>
-            <div id="autoReply" class="bg-black text-white p-3 rounded-md text-xs max-w-[85%] self-end hidden">
-              [Voice Automation]: "Thank you for calling. Please describe your emergency situation after the beep, then press 7..."
-            </div>
-            <div id="customerReply" class="bg-gray-200 text-black p-3 rounded-md text-xs max-w-[85%] self-start hidden">
-              [Dispatch Alert]: "Connecting to on-duty team line. Voice recording alert sent to contractor email."
-            </div>
-          </div>
+        <ol class="steps">
+          <li class="step">
+            <h3>Sign up</h3>
+            <p>Enter your company name, email, and the phone you answer. Add backup phones if you want them to ring too.</p>
+          </li>
+          <li class="step">
+            <h3>Add one line to your voicemail</h3>
+            <p>Tell callers what to do when you can't answer. Copy the line below into your greeting and your website.</p>
+          </li>
+          <li class="step">
+            <h3>Get alerted, call them back</h3>
+            <p>The customer enters your number and leaves a message. Your phones ring and you get an email with the recording and a one-tap call-back button.</p>
+          </li>
+        </ol>
 
-          <button id="triggerSimBtn" onclick="runSimulation()" class="w-full bg-black text-white py-3 text-xs font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-colors">
-            Simulate Missed Customer Call
-          </button>
+        <div class="linebox">
+          <p><small>Your voicemail and website line</small>&ldquo;For emergencies, call 615-640-8506 and enter our number: <span style="white-space:nowrap">615-555-0199</span>.&rdquo;</p>
+          <button type="button" class="btn btn-ghost btn-sm" id="copyLine">Copy line</button>
         </div>
+      </div>
+    </section>
 
-        <!-- System Explanation -->
-        <div class="space-y-6 text-sm leading-relaxed text-gray-700">
-          <div class="p-4 border-l-2 border-black bg-white">
-            <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">1. Voice Call Forwarding Triggers</h5>
-            <p>When you're out on a job site or after-hours, your unanswered shop calls automatically route to our automated line.</p>
+    <!-- Demo -->
+    <section class="section" id="demo" aria-labelledby="demo-title">
+      <div class="wrap">
+        <p class="section-label">See a call, start to finish</p>
+        <h2 class="title" id="demo-title">What your customer hears. What you get.</h2>
+        <p class="sub">This is the real call flow, with an example company. The customer is on the line for about a minute. Press play to watch it.</p>
+
+        <div class="demo">
+          <div class="panel">
+            <div class="panel-head"><span>Customer's call</span><span class="dot" id="liveDot"></span></div>
+            <div class="convo" id="convo" aria-live="polite">
+              <div class="msg note">Your voicemail said: &ldquo;For emergencies, call 615-640-8506 and enter our number.&rdquo;</div>
+              <div class="msg sys"><span class="who">Heartland Dispatch</span>&ldquo;Heartland Dispatch emergency line. If anyone is in danger, hang up and dial 9-1-1. Otherwise, enter the 10-digit phone number of the contractor you called.&rdquo;</div>
+              <div class="msg caller"><span class="who">Customer presses</span><span class="mono">6 1 5 5 5 5 0 1 9 9</span></div>
+              <div class="msg sys"><span class="who">Heartland Dispatch</span>&ldquo;Connecting you to Apex Plumbing. If that is not right, press 2.&rdquo;</div>
+              <div class="msg sys"><span class="who">Heartland Dispatch</span>&ldquo;This call is recorded, and by staying on the line you agree to that. After the beep, say your name, your phone number, your address, and what is wrong. Press any key when you are done.&rdquo;</div>
+              <div class="msg caller"><span class="who">Customer</span>&ldquo;Hi, this is Dana. My furnace is out and it's 20 degrees. 123 Oak Street. Please call me back.&rdquo;</div>
+              <div class="msg sys"><span class="who">Heartland Dispatch</span>&ldquo;Thank you. Apex Plumbing has been alerted by phone and email. They will call you back as soon as they can.&rdquo;</div>
+            </div>
+            <div class="demo-actions">
+              <button type="button" class="btn btn-sm" id="playBtn">&#9654; Play the call</button>
+            </div>
           </div>
-          <div class="p-4 border-l-2 border-black bg-white">
-            <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">2. Voice Prompt & Emergency Capture</h5>
-            <p>The caller is greeted immediately and prompted to describe their situation clearly after the beep.</p>
-          </div>
-          <div class="p-4 border-l-2 border-black bg-white">
-            <h5 class="font-bold text-black uppercase text-xs tracking-wider mb-1">3. Direct On-Duty Dialing & Email Summary</h5>
-            <p>Your designated on-duty technician receives an immediate direct call while an email alert containing the caller's recording link is delivered to your inbox.</p>
+
+          <div class="side-stack">
+            <div class="alert-card" id="cardPhone">
+              <h4>Your phone rings</h4>
+              <p class="big">Heartland Dispatch alert</p>
+              <p class="small">&ldquo;A customer needs a call back. Their number is 6, 1, 5, 5, 5, 5, 0, 1, 4, 2. Check your email to hear their message.&rdquo;</p>
+            </div>
+            <div class="alert-card" id="cardEmail">
+              <h4>Your inbox</h4>
+              <p class="big">&#128680; Emergency call from (615) 555-0142</p>
+              <p class="small">Tonight, 9:41 PM CST</p>
+              <span class="fake-btn solid">Call back (615) 555-0142</span>
+              <span class="fake-btn">&#9654; Listen to their message</span>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Pricing Summary -->
-    <section id="pricing" class="mt-20 pt-12 border-t border-gray-200">
-      <div class="max-w-xl mx-auto border border-black p-8 text-center bg-white">
-        <h3 class="text-xs font-mono uppercase tracking-widest text-gray-500 mb-2">Flat Pricing. Massive ROI. No Contracts.</h3>
-        <p class="text-4xl font-extrabold my-4">$250 <span class="text-base font-normal text-gray-500">/ month</span></p>
-        <p class="text-sm text-gray-600 mb-2">Includes unlimited voice dispatch routing, dedicated line setup, and instant emergency email summaries.</p>
-        <p class="text-xs font-semibold text-black uppercase tracking-wide mb-6">💡 One saved $1,000 repair job pays for 4 months of service.</p>
-        <button onclick="openModal()" class="w-full bg-black text-white py-4 text-xs font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-colors">
-          Start 10-Day Free Trial
-        </button>
-        <p class="text-xs text-gray-400 mt-3">Cancel anytime during the trial. Zero lock-in.</p>
+    <!-- Pricing -->
+    <section class="section" id="pricing" aria-labelledby="price-title">
+      <div class="wrap">
+        <div class="price-card">
+          <span class="trial-badge">10-day free trial</span>
+          <h2 class="title" id="price-title" style="margin-bottom:0">One plan. Everything included.</h2>
+          <p class="price">$250<span> / month</span></p>
+          <ul class="checks">
+            <li>Every message you capture, with no per-call fees</li>
+            <li>Phone call alert to your main number plus up to 5 backup numbers</li>
+            <li>Email with the recording and a one-tap call-back button</li>
+            <li>Callers are told the call is recorded, and to dial 9-1-1 if anyone is in danger</li>
+            <li>Change your numbers anytime by emailing us</li>
+          </ul>
+          <p class="roi"><strong>The math:</strong> if one emergency job is worth $1,000, a single saved call covers four months of service.</p>
+          <button type="button" class="btn btn-block" data-open-signup>Start 10-day free trial</button>
+          <p class="fineprint">Card required, not charged for 10 days. Cancel anytime by emailing <a href="mailto:coleeritter@gmail.com">coleeritter@gmail.com</a>.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section" id="faq" aria-labelledby="faq-title">
+      <div class="wrap">
+        <p class="section-label">Questions</p>
+        <h2 class="title" id="faq-title">Straight answers</h2>
+        <div class="faq">
+          <details>
+            <summary>Do I have to change my phone number or forward calls?</summary>
+            <p>No. Keep your number exactly as it is. You only add one sentence to your voicemail greeting and website telling callers to dial our number and enter yours.</p>
+          </details>
+          <details>
+            <summary>What does my customer have to do?</summary>
+            <p>Call the number from your voicemail greeting, key in your 10-digit phone number, and say what's wrong after the beep. They hear your company name before they leave the message, so they know they reached the right place.</p>
+          </details>
+          <details>
+            <summary>What if my phone goes to voicemail when you call?</summary>
+            <p>You also get an email with the caller's number, the recording, and a call-back button, so you still have the message. Save 615-640-8506 in your contacts so the alert call is recognized.</p>
+          </details>
+          <details>
+            <summary>Which phones ring?</summary>
+            <p>Your main number plus up to five backup numbers, all at the same time. Add your office, your on-call tech, or your spouse.</p>
+          </details>
+          <details>
+            <summary>Are the calls recorded?</summary>
+            <p>Yes. That's how you hear the message. Callers are told the call is recorded before the beep, and they can hang up if they don't want that. Recording laws vary by state, so see our <a href="/terms.html">Terms</a>.</p>
+          </details>
+          <details>
+            <summary>Is this a 911 or emergency service?</summary>
+            <p>No. It's a message-capture and alert tool for contractors. The caller is told at the start of the call to hang up and dial 9-1-1 if anyone is in danger.</p>
+          </details>
+          <details>
+            <summary>How do I cancel?</summary>
+            <p>Email <a href="mailto:coleeritter@gmail.com">coleeritter@gmail.com</a> from the address on your account. There's no contract. Your service continues until the end of the period you've paid for.</p>
+          </details>
+        </div>
       </div>
     </section>
   </main>
 
-  <!-- Footer -->
-  <footer class="w-full border-t border-gray-200 px-6 py-8 md:px-12 mt-12 text-xs text-gray-500">
-    <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+  <footer class="site-footer">
+    <div class="wrap">
+      <div><strong>Heartland Dispatch</strong><br>Emergency call capture for trade contractors.</div>
       <div>
-        <p class="font-bold text-black uppercase tracking-wider">Heartland Dispatch</p>
-        <p class="mt-0.5">Automated communications for trade contractors.</p>
-      </div>
-      <div>
-        <p>&copy; 2026 Heartland Dispatch. All rights reserved.</p>
+        <a href="mailto:coleeritter@gmail.com">coleeritter@gmail.com</a> &nbsp;&middot;&nbsp;
+        <a href="/terms.html">Terms</a> &nbsp;&middot;&nbsp;
+        <a href="/privacy.html">Privacy</a>
       </div>
     </div>
   </footer>
 
-  <!-- Modal with Primary & Secondary On-Call Fields -->
-  <div id="trialModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 hidden z-50">
-    <div class="bg-white border border-black max-w-md w-full p-6 relative">
-      <button onclick="closeModal()" class="absolute top-4 right-4 text-xs font-mono hover:underline">
-        [CLOSE]
-      </button>
-      <h3 class="text-lg font-bold uppercase tracking-tight mb-2">Start Your 10-Day Trial</h3>
-      <p class="text-xs text-gray-600 mb-6">Enter your business details below to activate your automated dispatch line and proceed to secure checkout.</p>
-      
-      <form onsubmit="handleFormSubmit(event)" class="space-y-4">
-        <div>
-          <label class="block text-xs font-mono uppercase mb-1">Company Name</label>
-          <input type="text" id="compName" placeholder="e.g., Apex Plumbing & Heating" required class="w-full border border-gray-300 p-2 text-sm focus:outline-none focus:border-black">
+  <div class="sticky-cta" id="stickyCta"><button type="button" class="btn btn-block" data-open-signup>Start 10-day free trial</button></div>
+
+  <!-- Signup dialog -->
+  <dialog class="modal" id="signup" aria-labelledby="signupTitle">
+    <div class="modal-body">
+      <button type="button" class="close" id="closeSignup" aria-label="Close">&times;</button>
+      <h3 id="signupTitle">Start your 10-day free trial</h3>
+      <p class="lede">Takes about a minute. Next you'll enter your card on Stripe's secure checkout. You won't be charged for 10 days.</p>
+
+      <form id="signupForm" novalidate>
+        <div class="field">
+          <label for="compName">Company name</label>
+          <input class="input" id="compName" name="company" type="text" autocomplete="organization" placeholder="Apex Plumbing &amp; Heating" maxlength="120" required>
+          <p class="err-text" id="err-compName">Please enter your company name.</p>
         </div>
-        <div>
-          <label class="block text-xs font-mono uppercase mb-1">Owner Email</label>
-          <input type="email" id="ownerEmail" placeholder="owner@company.com" required class="w-full border border-gray-300 p-2 text-sm focus:outline-none focus:border-black">
+        <div class="field">
+          <label for="ownerEmail">Email <span class="hint">Alerts and recordings are sent here.</span></label>
+          <input class="input" id="ownerEmail" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@company.com" maxlength="254" required>
+          <p class="err-text" id="err-ownerEmail">Please enter a valid email address.</p>
         </div>
-        
-        <div>
-          <label class="block text-xs font-mono uppercase mb-1">Primary On-Call Phone Number</label>
-          <span class="block text-[11px] text-gray-500 -mt-0.5 mb-1">(One you want called on duty)</span>
-          <input type="tel" id="primaryPhone" placeholder="e.g., 6155550199" required class="w-full border border-gray-300 p-2 text-sm focus:outline-none focus:border-black">
+        <div class="field">
+          <label for="primaryPhone">Your phone number <span class="hint">The number you answer. This is also the number your customers will key in.</span></label>
+          <input class="input" id="primaryPhone" name="phone" type="tel" autocomplete="tel-national" inputmode="tel" placeholder="(615) 555-0199" maxlength="20" required>
+          <p class="err-text" id="err-primaryPhone">Please enter a 10-digit phone number.</p>
         </div>
 
-        <!-- Backup / Secondary Numbers Tag Field -->
-        <div>
-          <label class="block text-xs font-mono uppercase mb-1">Backup / Secondary Lines (Optional)</label>
-          <div id="tagContainer" class="border border-gray-300 p-2 text-sm focus-within:border-black flex flex-wrap gap-1.5 min-h-[42px] items-center cursor-text" onclick="document.getElementById('phoneInput').focus()">
-            <input type="text" id="phoneInput" placeholder="Type 10-digit number and hit Enter..." class="flex-1 min-w-[180px] text-sm focus:outline-none bg-transparent">
+        <div class="field">
+          <button type="button" class="linkbtn" id="showBackups" aria-expanded="false" aria-controls="backupsBox">+ Also ring other phones (optional)</button>
+          <div id="backupsBox" hidden style="margin-top:10px">
+            <label class="label" for="phoneInput">Backup phone numbers <span class="hint">They all ring at once. Type a number and press Enter. Up to 5.</span></label>
+            <div class="chips" id="chips"><input id="phoneInput" type="tel" inputmode="tel" autocomplete="off" placeholder="(615) 555-0123" maxlength="20"></div>
+            <p class="err-text" id="err-backup">That doesn't look like a 10-digit number.</p>
           </div>
-          <p class="text-[11px] text-gray-500 mt-1.5 leading-tight">
-            Press <strong>Enter</strong> or <strong>Comma</strong> to add secondary backup numbers. Need to update staff numbers later? Email support anytime.
-          </p>
         </div>
 
-        <button type="submit" id="submitBtn" class="w-full bg-black text-white py-3 text-xs font-semibold uppercase tracking-wider border border-black hover:bg-white hover:text-black transition-colors mt-2">
-          Proceed to Stripe Checkout
-        </button>
+        <!-- Honeypot: real people never see or fill this -->
+        <div class="hp" aria-hidden="true"><label>Website <input type="text" id="website" name="website" tabindex="-1" autocomplete="off"></label></div>
+
+        <p class="consent">By continuing you agree to our <a href="/terms.html" target="_blank" rel="noopener">Terms</a> and <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>, including that calls to the dispatch line are recorded.</p>
+
+        <button type="submit" class="btn btn-block" id="submitBtn">Continue to secure checkout &rarr;</button>
+        <p class="form-msg" id="formMsg" role="alert"></p>
+        <p class="secure">Payments are handled by Stripe. We never see your card number.</p>
       </form>
-      <p id="modalMsg" class="text-xs font-mono text-center text-gray-500 mt-4 hidden"></p>
     </div>
-  </div>
+  </dialog>
 
   <script>
-    function openModal() {
-      document.getElementById('trialModal').classList.remove('hidden');
-    }
-    function closeModal() {
-      document.getElementById('trialModal').classList.add('hidden');
-    }
+  (function () {
+    var $ = function (id) { return document.getElementById(id); };
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    const tagContainer = document.getElementById('tagContainer');
-    const phoneInput = document.getElementById('phoneInput');
-    let phoneNumbers = [];
+    // ---------- helpers ----------
+    function digitsOf(s) {
+      var d = String(s || '').replace(/\D/g, '');
+      if (d.length === 11 && d.charAt(0) === '1') d = d.slice(1);
+      return d;
+    }
+    function prettyPhone(d) {
+      d = d.slice(0, 10);
+      if (d.length < 4) return d;
+      if (d.length < 7) return '(' + d.slice(0, 3) + ') ' + d.slice(3);
+      return '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6);
+    }
+    function store(key, val) { try { sessionStorage.setItem(key, val); } catch (e) {} }
+    function load(key) { try { return sessionStorage.getItem(key) || ''; } catch (e) { return ''; } }
 
-    phoneInput.addEventListener('keydown', function(e) {
-      if (['Enter', ' ', ','].includes(e.key)) {
-        e.preventDefault();
-        addTag(phoneInput.value.trim());
-      } else if (e.key === 'Backspace' && phoneInput.value === '' && phoneNumbers.length > 0) {
-        removeTag(phoneNumbers.length - 1);
-      }
+    // ---------- dialog ----------
+    var dlg = $('signup');
+    var opener = null;
+    function openSignup(e) {
+      opener = e && e.currentTarget;
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+      document.body.style.overflow = 'hidden';
+      setTimeout(function () { if (!$('compName').value) $('compName').focus(); }, 30);
+    }
+    function closeSignup() {
+      if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
+    }
+    dlg.addEventListener('close', function () { document.body.style.overflow = ''; if (opener && opener.focus) opener.focus(); });
+    dlg.addEventListener('click', function (e) { if (e.target === dlg) closeSignup(); }); // click on the dark backdrop
+    $('closeSignup').addEventListener('click', closeSignup);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-open-signup]'), function (b) { b.addEventListener('click', openSignup); });
+
+    // ---------- prefill from this browser session (so a bad-number retry or Stripe "back" doesn't wipe the form) ----------
+    ['compName', 'ownerEmail', 'primaryPhone'].forEach(function (id) { var v = load('hd_' + id); if (v) $(id).value = v; });
+    ['compName', 'ownerEmail', 'primaryPhone'].forEach(function (id) { $(id).addEventListener('input', function () { store('hd_' + id, $(id).value); }); });
+
+    // ---------- fields ----------
+    var primary = $('primaryPhone');
+    primary.addEventListener('input', function () { primary.value = prettyPhone(digitsOf(primary.value)); });
+
+    function setErr(id, on) {
+      var input = $(id), msg = $('err-' + id);
+      if (input) input.classList.toggle('bad', !!on);
+      if (msg) msg.classList.toggle('on', !!on);
+      if (input) input.setAttribute('aria-invalid', on ? 'true' : 'false');
+    }
+    var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    function checkName() { var ok = $('compName').value.trim().length > 0; setErr('compName', !ok); return ok; }
+    function checkEmail() { var ok = EMAIL_RE.test($('ownerEmail').value.trim()); setErr('ownerEmail', !ok); return ok; }
+    function checkPhone() { var ok = digitsOf(primary.value).length === 10; setErr('primaryPhone', !ok); return ok; }
+    $('compName').addEventListener('blur', function () { if ($('compName').value) checkName(); });
+    $('ownerEmail').addEventListener('blur', function () { if ($('ownerEmail').value) checkEmail(); });
+    primary.addEventListener('blur', function () { if (primary.value) checkPhone(); });
+    ['compName', 'ownerEmail', 'primaryPhone'].forEach(function (id) {
+      $(id).addEventListener('input', function () { if ($(id).classList.contains('bad')) { if (id === 'compName') checkName(); if (id === 'ownerEmail') checkEmail(); if (id === 'primaryPhone') checkPhone(); } });
     });
 
-    phoneInput.addEventListener('blur', function() {
-      if (phoneInput.value.trim() !== '') {
-        addTag(phoneInput.value.trim());
-      }
+    // ---------- backup numbers ----------
+    var backups = [];
+    var phoneInput = $('phoneInput');
+    $('showBackups').addEventListener('click', function () {
+      var box = $('backupsBox'), open = box.hidden;
+      box.hidden = !open;
+      this.setAttribute('aria-expanded', String(open));
+      this.textContent = open ? '− Hide backup phones' : '+ Also ring other phones (optional)';
+      if (open) phoneInput.focus();
     });
+    $('chips').addEventListener('click', function () { phoneInput.focus(); });
 
-    function addTag(val) {
-      const cleanVal = val.replace(/,/g, '').trim();
-      if (cleanVal && !phoneNumbers.includes(cleanVal)) {
-        phoneNumbers.push(cleanVal);
-        renderTags();
-        phoneInput.value = '';
-      }
-    }
-
-    function removeTag(index) {
-      phoneNumbers.splice(index, 1);
-      renderTags();
-    }
-
-    function renderTags() {
-      const existingChips = tagContainer.querySelectorAll('.tag-chip');
-      existingChips.forEach(chip => chip.remove());
-
-      phoneNumbers.forEach((num, index) => {
-        const chip = document.createElement('span');
-        chip.className = 'tag-chip bg-black text-white text-xs px-2 py-1 flex items-center gap-1.5 font-mono';
-        chip.innerHTML = `
-          <span>${num}</span>
-          <button type="button" onclick="event.stopPropagation(); removeTag(${index})" class="hover:text-gray-300 font-bold ml-0.5">&times;</button>
-        `;
-        tagContainer.insertBefore(chip, phoneInput);
+    function renderChips() {
+      Array.prototype.forEach.call($('chips').querySelectorAll('.chip'), function (c) { c.remove(); });
+      backups.forEach(function (d, i) {
+        var chip = document.createElement('span');
+        chip.className = 'chip';
+        var label = document.createElement('span');
+        label.textContent = prettyPhone(d);
+        var x = document.createElement('button');
+        x.type = 'button';
+        x.setAttribute('aria-label', 'Remove ' + prettyPhone(d));
+        x.innerHTML = '&times;';
+        x.addEventListener('click', function (e) { e.stopPropagation(); backups.splice(i, 1); renderChips(); phoneInput.focus(); });
+        chip.appendChild(label); chip.appendChild(x);
+        $('chips').insertBefore(chip, phoneInput);
       });
     }
-
-    // Submit form -> Save Lead to Supabase -> Redirect to Stripe
-    async function handleFormSubmit(event) {
-      event.preventDefault();
-
-      if (phoneInput.value.trim() !== '') {
-        addTag(phoneInput.value.trim());
-      }
-
-      const compName = document.getElementById('compName').value;
-      const ownerEmail = document.getElementById('ownerEmail').value;
-      const primaryPhone = document.getElementById('primaryPhone').value;
-      const submitBtn = document.getElementById('submitBtn');
-
-      submitBtn.disabled = true;
-      submitBtn.innerText = "ACTIVATING TRIAL...";
-
-      try {
-        await fetch('/api/save-lead', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            company_name: compName,
-            owner_email: ownerEmail,
-            primary_phone: primaryPhone,
-            backup_phones: phoneNumbers
-          })
-        });
-      } catch (err) {
-        console.error('Lead save error:', err);
-      }
-
-      const stripeCheckoutUrl = "https://buy.stripe.com/14AfZ94a49dg9bkcmA0sU00";
-      const msg = document.getElementById('modalMsg');
-      msg.classList.remove('hidden');
-      msg.innerText = "Redirecting to secure Stripe checkout...";
-
-      setTimeout(() => {
-        window.location.href = stripeCheckoutUrl;
-      }, 600);
+    function addBackup(raw) {
+      var parts = String(raw).split(/[,;\n]+/);
+      var ok = true;
+      parts.forEach(function (p) {
+        if (!p.trim()) return;
+        var d = digitsOf(p);
+        if (d.length !== 10) { ok = false; return; }
+        if (d === digitsOf(primary.value) || backups.indexOf(d) !== -1) return; // already covered
+        if (backups.length >= 5) { ok = false; return; }
+        backups.push(d);
+      });
+      $('err-backup').textContent = backups.length >= 5 && !ok ? 'You can add up to 5 backup numbers.' : "That doesn't look like a 10-digit number.";
+      $('err-backup').classList.toggle('on', !ok);
+      if (ok) phoneInput.value = '';
+      renderChips();
+      return ok;
     }
+    phoneInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); if (phoneInput.value.trim()) addBackup(phoneInput.value); }
+      else if (e.key === 'Backspace' && !phoneInput.value && backups.length) { backups.pop(); renderChips(); }
+    });
+    phoneInput.addEventListener('input', function () {
+      if (/[,;\n]/.test(phoneInput.value)) addBackup(phoneInput.value); // pasted a list
+      $('err-backup').classList.remove('on');
+    });
+    phoneInput.addEventListener('blur', function () { if (phoneInput.value.trim()) addBackup(phoneInput.value); });
 
-    function runSimulation() {
-      const btn = document.getElementById('triggerSimBtn');
-      const autoReply = document.getElementById('autoReply');
-      const customerReply = document.getElementById('customerReply');
+    // ---------- submit ----------
+    var form = $('signupForm'), btn = $('submitBtn'), msg = $('formMsg');
+    var BTN_TEXT = btn.textContent;
+    function showMsg(text, isErr) { msg.textContent = text; msg.className = 'form-msg' + (isErr ? ' error' : ''); }
+    function resetBtn() { btn.disabled = false; btn.textContent = BTN_TEXT; }
+    window.addEventListener('pageshow', function (e) { if (e.persisted) { resetBtn(); showMsg('', false); } }); // came back from Stripe
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (btn.disabled) return;
+      if (phoneInput.value.trim()) { if (!addBackup(phoneInput.value)) { $('showBackups').click(); return; } }
+
+      var okName = checkName(), okEmail = checkEmail(), okPhone = checkPhone();
+      if (!(okName && okEmail && okPhone)) {
+        showMsg('Please fix the highlighted fields.', true);
+        (!okName ? $('compName') : !okEmail ? $('ownerEmail') : primary).focus();
+        return;
+      }
 
       btn.disabled = true;
-      btn.innerText = 'SIMULATING CALL...';
-      autoReply.classList.add('hidden');
-      customerReply.classList.add('hidden');
+      btn.textContent = 'Saving…';
+      showMsg('', false);
 
-      setTimeout(() => {
-        autoReply.classList.remove('hidden');
-        btn.innerText = 'RECORDING MESSAGE AFTER BEEP...';
-      }, 1200);
+      var controller = new AbortController();
+      var timer = setTimeout(function () { controller.abort(); }, 15000);
 
-      setTimeout(() => {
-        customerReply.classList.remove('hidden');
-        btn.disabled = false;
-        btn.innerText = 'RESET SIMULATION';
-      }, 2800);
+      fetch('/api/save-lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          company_name: $('compName').value.trim(),
+          owner_email: $('ownerEmail').value.trim(),
+          primary_phone: digitsOf(primary.value),
+          backup_phones: backups,
+          website: $('website').value
+        })
+      })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (data) { return { ok: r.ok, data: data }; }); })
+        .then(function (res) {
+          clearTimeout(timer);
+          if (!res.ok || !res.data.stripeUrl) throw new Error(res.data.error || 'We could not save your details. Please try again.');
+          btn.textContent = 'Taking you to secure checkout…';
+          window.location.assign(res.data.stripeUrl);
+          setTimeout(resetBtn, 8000); // if the redirect is blocked, let them try again
+        })
+        .catch(function (err) {
+          clearTimeout(timer);
+          var text = err && err.name === 'AbortError' ? 'That took too long. Please check your connection and try again.' : (err && err.message) || 'Something went wrong. Please try again.';
+          showMsg(text, true);
+          resetBtn();
+        });
+    });
+
+    // ---------- copy the voicemail line ----------
+    $('copyLine').addEventListener('click', function () {
+      var text = 'For emergencies, call 615-640-8506 and enter our number: [YOUR NUMBER].';
+      var b = this;
+      function done() { var old = b.textContent; b.textContent = 'Copied. Add your number.'; setTimeout(function () { b.textContent = old; }, 2200); }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, done); else done();
+    });
+
+    // ---------- demo ----------
+    var msgs = Array.prototype.slice.call(document.querySelectorAll('#convo .msg'));
+    var cards = [$('cardPhone'), $('cardEmail')];
+    var timers = [];
+    var playing = false;
+    function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+    function showAll() { msgs.forEach(function (m) { m.classList.add('show'); }); cards.forEach(function (c) { c.classList.add('show'); }); }
+    function hideAll() { msgs.forEach(function (m) { m.classList.remove('show'); }); cards.forEach(function (c) { c.classList.remove('show'); }); }
+    function play() {
+      clearTimers(); hideAll(); playing = true;
+      $('playBtn').innerHTML = '&#8635; Replay';
+      $('liveDot').classList.add('live');
+      var t = 0;
+      msgs.forEach(function (m, i) {
+        timers.push(setTimeout(function () { m.classList.add('show'); m.scrollIntoView && 0; }, t));
+        t += i === 0 ? 900 : (m.classList.contains('caller') ? 1400 : 1900);
+      });
+      timers.push(setTimeout(function () { cards[0].classList.add('show'); }, t));
+      timers.push(setTimeout(function () { cards[1].classList.add('show'); $('liveDot').classList.remove('live'); playing = false; }, t + 1200));
     }
+    $('playBtn').addEventListener('click', function () { if (reduceMotion) { showAll(); return; } play(); });
+    // Show the finished call right away for people who prefer reduced motion; otherwise play once when scrolled into view
+    if (reduceMotion || !('IntersectionObserver' in window)) { showAll(); }
+    else {
+      var seen = false;
+      new IntersectionObserver(function (entries, obs) {
+        entries.forEach(function (en) { if (en.isIntersecting && !seen) { seen = true; play(); obs.disconnect(); } });
+      }, { threshold: 0.35 }).observe($('convo'));
+    }
+
+    // ---------- sticky CTA on phones: show after the hero button scrolls away ----------
+    if ('IntersectionObserver' in window) {
+      var sticky = $('stickyCta');
+      new IntersectionObserver(function (entries) {
+        var hero = entries[0];
+        sticky.classList.toggle('show', !hero.isIntersecting && hero.boundingClientRect.top < 0 && !dlg.open);
+      }).observe($('heroCta'));
+    }
+  })();
   </script>
 </body>
 </html>
