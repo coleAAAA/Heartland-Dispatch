@@ -1,215 +1,607 @@
+// api/telnyx-webhook.js
+// Heartland Dispatch call flow (Telnyx TeXML). Callers dial the dispatch number, enter a contractor's phone number,
+// leave a message, and the contractor is alerted by phone + email.
+//
+// Optional environment variables (the flow works without them):
+//   WEBHOOK_SECRET        any long random string. Signs the internal URLs so nobody else can trigger alerts. RECOMMENDED.
+//   OWNER_EMAIL           your email. Gets a message whenever a call fails. RECOMMENDED.
+//   ENABLE_TRANSCRIPTION  set to "true" to try Telnyx transcription (off by default).
+//   RESEND_FROM           verified sender, e.g. Heartland Dispatch <dispatch@heartlanddispatch.app>
+
+import crypto from 'node:crypto';
 import { Resend } from 'resend';
+
+const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
+
+// ---------- small helpers ----------
+const xml = (inner) => `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+${inner}
+</Response>`;
+
+// Escape text going into XML / HTML (a raw "&" in a URL or company name breaks TeXML)
+const esc = (s) =>
+  String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+const last10 = (s) => String(s || '').replace(/\D/g, '').slice(-10);
+const toE164 = (s) => {
+  const d = last10(s);
+  return d.length === 10 ? `+1${d}` : null;
+};
+const pretty = (s) => {
+  const d = last10(s);
+  return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : 'an unknown number';
+};
+const spokenDigits = (s) => last10(s).split('').join(', ');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const first = (...vals) => vals.find((v) => typeof v === 'string' && v.trim() !== '') || '';
+
+function withTimeout(promise, ms, label) {
+  let t;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      t = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    }),
+  ]).finally(() => clearTimeout(t));
+}
+
+// ---------- signed URLs (stops strangers from forging "message recorded" requests) ----------
+const secret = () => process.env.WEBHOOK_SECRET || '';
+const sign = (...parts) =>
+  secret() ? crypto.createHmac('sha256', secret()).update(parts.join('|')).digest('hex').slice(0, 24) : '';
+const sigOk = (given, ...parts) => {
+  if (!secret()) return true; // not configured: allowed, but logged in the route step
+  const expected = sign(...parts);
+  const g = String(given || '');
+  return g.length === expected.length && crypto.timingSafeEqual(Buffer.from(g), Buffer.from(expected));
+};
+
+// ---------- database ----------
+const dbKey = () => process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+const dbFetch = (url, opts = {}) =>
+  fetch(url, {
+    ...opts,
+    headers: {
+      apikey: dbKey(),
+      Authorization: `Bearer ${dbKey()}`,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+    },
+    signal: AbortSignal.timeout(3000),
+  });
+
+// Returns the matching ACTIVE client, or null. Any phone number registered on the account works
+// (primary or backup). THROWS if the database call itself fails.
+async function findClient(digits) {
+  if (digits.length !== 10) return null;
+  const url = new URL(`${SUPABASE_BASE_URL}/rest/v1/clients`);
+  url.searchParams.set('select', 'id,forward_number,email,client_name,contractor_phone');
+  url.searchParams.set('or', `(contractor_phone.ilike.*${digits}*,forward_number.ilike.*${digits}*)`);
+  url.searchParams.set('status', 'eq.active'); // suspended or unpaid signups don't get service
+  url.searchParams.set('limit', '5');
+
+  const dbRes = await dbFetch(url);
+  const text = await dbRes.text();
+  console.log('SUPABASE', dbRes.status, text);
+  if (!dbRes.ok) throw new Error(`Supabase lookup failed with status ${dbRes.status}`);
+  const rows = JSON.parse(text);
+  // If a number somehow appears on two accounts, the account whose MAIN number it is wins.
+  return rows.find((r) => last10(r.contractor_phone) === digits) || rows[0] || null;
+}
+
+// Call log. Doubles as a duplicate guard: each CallSid can be "claimed" once.
+// Returns 'claimed', 'duplicate' or 'unknown' (log table missing or unreachable). Never throws.
+async function claimCall(callSid, row) {
+  if (!callSid) return 'unknown';
+  try {
+    const url = new URL(`${SUPABASE_BASE_URL}/rest/v1/calls`);
+    url.searchParams.set('on_conflict', 'call_sid');
+    const r = await dbFetch(url, {
+      method: 'POST',
+      headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+      body: JSON.stringify({ call_sid: callSid, ...row }),
+    });
+    const t = await r.text();
+    if (!r.ok) {
+      console.error('CALL LOG UNAVAILABLE', r.status, t.slice(0, 200));
+      return 'unknown';
+    }
+    return JSON.parse(t).length ? 'claimed' : 'duplicate';
+  } catch (e) {
+    console.error('CALL LOG ERROR', e.message);
+    return 'unknown';
+  }
+}
+
+async function updateCall(callSid, fields) {
+  if (!callSid) return;
+  try {
+    const url = new URL(`${SUPABASE_BASE_URL}/rest/v1/calls`);
+    url.searchParams.set('call_sid', `eq.${callSid}`);
+    await dbFetch(url, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(fields) });
+  } catch (e) {
+    console.error('CALL LOG UPDATE ERROR', e.message);
+  }
+}
+
+// ---------- notify you when something breaks ----------
+async function alertOwner(subject, detail) {
+  const to = process.env.OWNER_EMAIL;
+  if (!to || !process.env.RESEND_API_KEY) return;
+  try {
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    await withTimeout(
+      resend.emails.send({
+        from: process.env.RESEND_FROM || 'Heartland Dispatch <onboarding@resend.dev>',
+        to,
+        subject: `⚠️ ${subject}`,
+        text: String(detail || '').slice(0, 3000),
+      }),
+      6000,
+      'owner alert'
+    );
+  } catch (e) {
+    console.error('OWNER ALERT FAILED:', e.message);
+  }
+}
+
+// ---------- what callers hear (kept short on purpose) ----------
+const SAY = {
+  first:
+    'Heartland Dispatch emergency line. If anyone is in danger, hang up and dial 9 1 1. Otherwise, enter the 10 digit phone number of the contractor you called.',
+  noInput: 'Sorry, I did not catch that. Please enter the 10 digit phone number of the contractor you called.',
+  badLength: 'That was not 10 digits. Please try again.',
+  notFound: 'We could not find that number. Please try again.',
+  again: 'No problem. Please enter the number again.',
+  record:
+    'This call is recorded, and by staying on the line you agree to that. After the beep, say your name, your phone number, your address, and what is wrong. Press any key when you are done.',
+  silent: 'I did not hear anything. After the beep, please say what is wrong. Press any key when you are done.',
+  gaveUpNoInput:
+    'We did not get a number. Please call back and try again. If anyone is in danger, hang up and dial 9 1 1.',
+  gaveUpNotFound:
+    'Sorry, we still could not find that number. Please check it and call back. If anyone is in danger, hang up and dial 9 1 1.',
+  failure:
+    'We are sorry, our system could not reach the contractor. Please call the contractor directly. If anyone is in danger, hang up and dial 9 1 1.',
+};
+
+const say = (text) => `<Say voice="alice">${text}</Say>`;
+const hangupWith = (text) => xml(`${say(text)}\n<Hangup />`);
+
+// ---------- the alert email ----------
+function buildAlertEmail({ clientName, prettyCaller, callbackTel, timeStr, recordingUrl, seconds }) {
+  const length = Number.isFinite(seconds) && seconds > 0 ? ` (${Math.round(seconds)} sec)` : '';
+  const text = `Emergency call for ${clientName}.\nCaller: ${prettyCaller}\nTime: ${timeStr}\n${
+    recordingUrl ? `Listen${length}: ${recordingUrl}` : 'No message was recorded. Call the number above.'
+  }`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 520px; padding: 20px;">
+      <h2 style="margin: 0 0 8px;">🚨 Emergency call for ${esc(clientName)}</h2>
+      <p style="margin: 0 0 16px; color: #444;">A customer is waiting to hear back. Please call them as soon as you can.</p>
+      <p style="font-size: 20px; margin: 0 0 4px;"><strong>${esc(prettyCaller)}</strong></p>
+      <p style="color: #666; margin: 0 0 16px;">${esc(timeStr)}</p>
+      ${
+        callbackTel
+          ? `<p><a href="tel:${callbackTel}" style="display: inline-block; background: #000; color: #fff; padding: 14px 22px; text-decoration: none; font-weight: bold;">Call back ${esc(prettyCaller)}</a></p>`
+          : ''
+      }
+      ${
+        recordingUrl
+          ? `<p><a href="${esc(recordingUrl)}" style="display: inline-block; border: 2px solid #000; color: #000; padding: 12px 20px; text-decoration: none; font-weight: bold;">&#9654; Listen to their message${esc(length)}</a></p>`
+          : '<p>No message was recorded. Please call the number above.</p>'
+      }
+    </div>`;
+  return { text, html };
+}
+
+// ---------- alert the contractor (email + every registered phone). Never throws. ----------
+async function deliver({ params, digits, rec, baseUrl, mode }) {
+  // mode "action": the caller is still on the line (fail open if the call log is unavailable)
+  // mode "callback": safety net after a hang-up (only acts when it can prove nobody else already did)
+  const realSid = first(params.CallSid, params.call_sid);
+  const callSid = params.tok ? `rec:${params.tok}` : realSid; // the dedupe key
+  const recordingUrl = first(
+    params.RecordingUrl,
+    params.recording_url,
+    params.data?.payload?.recording_url,
+    params.data?.payload?.recording_urls?.mp3
+  );
+  const callerNumber = first(params.caller, params.From, params.from, params.Caller) || 'Unknown Caller';
+  const seconds = Number(params.RecordingDuration);
+
+  const client = await findClient(digits); // throws on database failure; the caller handles it
+  if (!client) return { outcome: 'no_client' };
+
+  const claim = await claimCall(callSid, {
+    client_id: client.id,
+    contractor_phone: digits,
+    telnyx_call_sid: realSid || null,
+    caller_number: last10(callerNumber) || null,
+    recording_url: recordingUrl || null,
+    recording_seconds: Number.isFinite(seconds) ? seconds : null,
+    outcome: 'processing',
+  });
+  if (claim === 'duplicate' || (mode === 'callback' && claim !== 'claimed')) {
+    console.log('SKIPPING DELIVERY:', mode, claim);
+    return { outcome: 'duplicate', clientName: client.client_name };
+  }
+
+  const clientName = client.client_name || 'Contractor';
+  // Every number on the account (primary + backups) rings. Normalized, de-duplicated, invalid entries dropped.
+  const ringNumbers = [
+    ...new Set(
+      [client.contractor_phone, ...String(client.forward_number || '').split(',')].map(toE164).filter(Boolean)
+    ),
+  ];
+
+  const prettyCaller = pretty(callerNumber);
+  const timeStr = new Date().toLocaleString('en-US', {
+    timeZone: 'America/Chicago',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+  const fromNumber = process.env.TELNYX_FROM_NUMBER || params.To;
+
+  // IMPORTANT: await these. Vercel freezes the function once the response is sent.
+  // Each task resolves to { channel, ok }.
+  const tasks = [];
+
+  if (client.email && process.env.RESEND_API_KEY) {
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const mail = buildAlertEmail({
+      clientName,
+      prettyCaller,
+      callbackTel: toE164(callerNumber),
+      timeStr,
+      recordingUrl,
+      seconds,
+    });
+    tasks.push(
+      withTimeout(
+        resend.emails.send({
+          from: process.env.RESEND_FROM || 'Heartland Dispatch <onboarding@resend.dev>',
+          to: client.email,
+          subject: `🚨 Emergency call from ${prettyCaller} - call back now`,
+          text: mail.text,
+          html: mail.html,
+        }),
+        7000,
+        'email'
+      )
+        .then(({ data, error }) => {
+          // Resend does NOT throw on API errors; it returns { error }
+          if (error) {
+            console.error('RESEND ERROR:', JSON.stringify(error));
+            return { channel: 'email', ok: false };
+          }
+          console.log('RESEND OK:', data?.id);
+          return { channel: 'email', ok: true };
+        })
+        .catch((e) => {
+          console.error('RESEND THROW:', e.message);
+          return { channel: 'email', ok: false };
+        })
+    );
+  } else {
+    console.error('Email skipped. email:', client.email, 'hasKey:', !!process.env.RESEND_API_KEY);
+  }
+
+  if (ringNumbers.length && process.env.TELNYX_API_KEY && process.env.TELNYX_TEXML_APP_ID) {
+    for (const to of ringNumbers) {
+      tasks.push(
+        fetch(`https://api.telnyx.com/v2/texml/calls/${process.env.TELNYX_TEXML_APP_ID}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${process.env.TELNYX_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            To: to,
+            From: fromNumber,
+            Url: `${baseUrl}?step=outbound_alert&caller=${encodeURIComponent(callerNumber)}`,
+          }),
+          signal: AbortSignal.timeout(6000),
+        })
+          .then(async (r) => {
+            console.log('TELNYX OUTBOUND', to, r.status, await r.text());
+            return { channel: 'phone', ok: r.ok };
+          })
+          .catch((e) => {
+            console.error('TELNYX OUTBOUND THROW', to, e.message);
+            return { channel: 'phone', ok: false };
+          })
+      );
+    }
+  } else {
+    console.error('Outbound calls skipped. ringNumbers:', ringNumbers);
+  }
+
+  const results = await Promise.all(tasks);
+  const channels = [...new Set(results.filter((r) => r.ok).map((r) => r.channel))];
+  const outcome = channels.length ? 'delivered' : 'failed';
+
+  await Promise.all([
+    updateCall(callSid, { outcome, channels: channels.join('+') || null }),
+    outcome === 'failed'
+      ? alertOwner(
+          'Heartland Dispatch: alert NOT delivered',
+          `Contractor: ${clientName} (${digits})\nCaller: ${prettyCaller}\nRecording: ${recordingUrl || 'none'}\nTime: ${timeStr}\nCheck the Vercel logs for RESEND / TELNYX lines.`
+        )
+      : null,
+  ]);
+
+  return { outcome, channels, clientName };
+}
+
+function closingMessage(result) {
+  const who = result.clientName ? esc(result.clientName) : 'the contractor';
+  const safety = 'If anyone is in danger, hang up and dial 9 1 1. Goodbye.';
+  if (result.outcome === 'duplicate') {
+    return `Thank you. ${who} has been alerted and will call you back as soon as they can. ${safety}`;
+  }
+  // Only promise what actually happened
+  const how =
+    result.channels.includes('phone') && result.channels.includes('email')
+      ? 'by phone and email'
+      : result.channels.includes('phone')
+        ? 'by phone'
+        : 'by email';
+  return `Thank you. ${who} has been alerted ${how}. They will call you back as soon as they can. ${safety}`;
+}
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'text/xml');
 
   try {
-    // 1. Foolproof URL and Body Parameter Extraction
-    const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers.host || 'heartlanddispatch-gamma.vercel.app';
-    const parsedUrl = new URL(req.url || '', `${protocol}://${host}`);
-    
-    const queryStep = parsedUrl.searchParams.get('step') || '';
-    const queryDigits = parsedUrl.searchParams.get('digits') || '';
-
+    // ---------- parse body (JSON, form-encoded, or GET query) ----------
     let body = {};
-    if (req.body) {
-      if (typeof req.body === 'string') {
-        try { body = JSON.parse(req.body); } 
-        catch {
-          try { body = Object.fromEntries(new URLSearchParams(req.body).entries()); } catch {}
-        }
-      } else if (Buffer.isBuffer(req.body)) {
-        try {
-          body = Object.fromEntries(new URLSearchParams(req.body.toString('utf8')).entries());
-        } catch {}
-      } else if (typeof req.body === 'object') {
-        body = req.body;
-      }
-    }
-
-    const currentStep = queryStep || body.step || '';
-    const rawTo = body.To || body.to || '';
-    const callerNumber = body.From || body.from || 'Unknown Caller';
-    const masterTelnyxNumber = rawTo.startsWith('+') ? rawTo : (rawTo ? `+${rawTo}` : '+16155550199');
-    const recordingUrl = body.RecordingUrl || body.recording_url || '';
-
-    const rawDigits = queryDigits || body.Digits || body.digits || '';
-    const cleanDigits = String(rawDigits).replace(/\D/g, '');
-
-    console.log(`[CALL PIPELINE] Step: "${currentStep}" | Digits: "${cleanDigits}" | Caller: "${callerNumber}"`);
-
-    const SUPABASE_BASE_URL = 'https://oexjbmllasslcxfqprlq.supabase.co';
-    const SUPABASE_KEY = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const validateUrl = `https://${host}/api/telnyx-webhook?step=validate`;
-
-    // 2. Bulletproof Supabase Lookup with Strict 3-Second Timeout
-    async function getContractor(targetDigits) {
-      if (!targetDigits || !SUPABASE_KEY) return null;
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
-
+    if (typeof req.body === 'string') {
       try {
-        const response = await fetch(`${SUPABASE_BASE_URL}/rest/v1/clients?select=*`, {
-          method: 'GET',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (!response.ok) return null;
-        const rows = await response.json();
-        if (!rows || rows.length === 0) return null;
-
-        return rows.find(r => {
-          const dbClean = String(r.contractor_phone || '').replace(/\D/g, '');
-          return dbClean === targetDigits || dbClean.endsWith(targetDigits) || targetDigits.endsWith(dbClean);
-        }) || null;
-      } catch (err) {
-        clearTimeout(timeoutId);
-        console.error('[SUPABASE TIMEOUT/ERROR]', err);
-        return null;
+        body = JSON.parse(req.body);
+      } catch {
+        body = Object.fromEntries(new URLSearchParams(req.body));
       }
+    } else if (req.body && typeof req.body === 'object') {
+      body = req.body;
     }
 
-    // ------------------------------------------------------------------
-    // STEP 3: Route Final Call, Send Resend Email & Outbound Ring
-    // ------------------------------------------------------------------
-    if (currentStep === 'route') {
-      let forwardNumber = null;
-      let contractorEmail = null;
-      let clientName = 'Contractor';
+    // Merge query + body so it works whether Telnyx uses GET or POST
+    const params = { ...req.query, ...body };
+    console.log('WEBHOOK PARAMS:', JSON.stringify(params));
 
-      const contractor = await getContractor(cleanDigits);
-      if (contractor) {
-        forwardNumber = contractor.forward_number || contractor.contractor_phone || null;
-        contractorEmail = contractor.email || null;
-        clientName = contractor.client_name || 'Contractor';
-        console.log(`[ROUTE] Matched Contractor: ${clientName} | Forward: ${forwardNumber} | Email: ${contractorEmail}`);
-      } else {
-        console.warn(`[ROUTE] No contractor match found for digits: ${cleanDigits}`);
+    const step = params.step || '';
+    const baseUrl = `https://${req.headers.host}/api/telnyx-webhook`;
+    const callerDigits = last10(params.caller || params.From);
+
+    // Signed URL for the steps that must not be forgeable
+    // "tok" is a random id made for each recording attempt. The hang-up safety net and the normal path both carry it,
+    // so we can tell they are the same message without relying on any Telnyx parameter name.
+    const signedUrl = (name, digits, rec, tok) => {
+      const q = new URLSearchParams({ step: name, contractor: digits, rec: String(rec), tok });
+      if (callerDigits) q.set('caller', callerDigits);
+      const s = sign(name, digits, rec, tok);
+      if (s) q.set('sig', s);
+      return `${baseUrl}?${q.toString()}`;
+    };
+
+    // Ask for the contractor's number. If nothing is typed, Telnyx falls through to the Redirect (step=noinput).
+    const askForNumber = (text, attempt = 1) =>
+      xml(`<Gather action="${esc(`${baseUrl}?step=confirm&attempt=${attempt}`)}" method="POST" numDigits="10" timeout="15">
+    ${say(text)}
+</Gather>
+<Redirect method="POST">${esc(`${baseUrl}?step=noinput&attempt=${attempt}`)}</Redirect>`);
+
+    // Prompt + record. "rec" counts recording attempts so a silent caller gets exactly one more chance.
+    // Any key ends the recording. The extra callback is a safety net for callers who just hang up.
+    const recordXml = (digits, rec, text) => {
+      const tok = crypto.randomBytes(8).toString('hex');
+      const transcribe =
+        process.env.ENABLE_TRANSCRIPTION === 'true'
+          ? ` transcription="true" transcriptionCallback="${esc(signedUrl('transcribed', digits, rec, tok))}"`
+          : '';
+      return xml(`${say(text)}
+<Record action="${esc(signedUrl('route', digits, rec, tok))}" method="POST" maxLength="120" timeout="8" finishOnKey="1234567890*#" playBeep="true" recordingStatusCallback="${esc(signedUrl('recorded', digits, rec, tok))}" recordingStatusCallbackMethod="POST"${transcribe} />`);
+    };
+
+    // ---------- Status callbacks (fired when a call ends): acknowledge and do nothing ----------
+    if (!step && (params.CallbackSource === 'call-progress-events' || params.CallStatus === 'completed')) {
+      console.log('STATUS CALLBACK IGNORED:', params.CallStatus);
+      return res.status(200).send(xml(''));
+    }
+
+    // ---------- Loop guard: never answer a call that came from our own number ----------
+    const ownDigits = last10(process.env.TELNYX_FROM_NUMBER);
+    if (!step && ownDigits && last10(params.From) === ownDigits) {
+      console.error('LOOP GUARD: call from our own number, hanging up');
+      return res.status(200).send(xml('<Hangup />'));
+    }
+
+    // ---------- outbound_alert: what the contractor hears when they pick up ----------
+    if (step === 'outbound_alert') {
+      const spoken = spokenDigits(params.caller) || 'unknown';
+      return res.status(200).send(
+        xml(`<Say>Heartland Dispatch alert. A customer needs a call back. Their number is ${esc(spoken)}. Again, ${esc(
+          spoken
+        )}. Check your email to hear their message. Goodbye.</Say>
+<Hangup />`)
+      );
+    }
+
+    // ---------- STEP 4: route (the caller finished recording and is still on the line) ----------
+    if (step === 'route') {
+      const digits = last10(params.contractor);
+      const rec = Number(params.rec) || 1;
+
+      if (!sigOk(params.sig, 'route', digits, rec, String(params.tok || ''))) {
+        console.error('BAD SIGNATURE on route');
+        return res.status(403).send(xml(''));
+      }
+      if (!secret()) console.error('WARNING: WEBHOOK_SECRET is not set, so webhook URLs are unsigned.');
+
+      // Caller pressed a key right away or froze: give them one more try. (Skipped if Telnyx sends no duration.)
+      const duration = Number(params.RecordingDuration);
+      if (Number.isFinite(duration) && duration < 2 && rec < 2 && digits.length === 10) {
+        return res.status(200).send(recordXml(digits, rec + 1, SAY.silent));
       }
 
-      // Deliver Resend Email (Non-fatal)
-      if (contractorEmail && contractorEmail !== 'null' && process.env.RESEND_API_KEY) {
+      let result;
+      try {
+        result = await deliver({ params, digits, rec, baseUrl, mode: 'action' });
+      } catch (e) {
+        console.error('DELIVERY FAILED:', e.message);
+        await alertOwner('Heartland Dispatch: call handling error', `${e.message}\nContractor digits: ${digits}`);
+        return res.status(200).send(hangupWith(SAY.failure));
+      }
+      if (result.outcome === 'no_client') {
+        console.error('No active client for digits:', digits);
+        return res.status(200).send(hangupWith(SAY.failure));
+      }
+      if (result.outcome === 'failed') {
+        console.error('ALERT NOT DELIVERED ON ANY CHANNEL');
+        return res.status(200).send(hangupWith(SAY.failure));
+      }
+      return res.status(200).send(hangupWith(closingMessage(result)));
+    }
+
+    // ---------- recorded: Telnyx says the recording is ready (safety net if the caller hung up) ----------
+    if (step === 'recorded') {
+      const digits = last10(params.contractor);
+      const rec = Number(params.rec) || 1;
+      if (!sigOk(params.sig, 'recorded', digits, rec, String(params.tok || ''))) {
+        console.error('BAD SIGNATURE on recorded');
+        return res.status(403).send(xml(''));
+      }
+
+      const status = String(params.RecordingStatus || '').toLowerCase();
+      const duration = Number(params.RecordingDuration);
+      const hasUrl = !!first(
+        params.RecordingUrl,
+        params.recording_url,
+        params.data?.payload?.recording_url,
+        params.data?.payload?.recording_urls?.mp3
+      );
+      console.log('RECORDING CALLBACK:', JSON.stringify(params).slice(0, 1500));
+      if ((status && status !== 'completed') || (Number.isFinite(duration) && duration < 2) || !hasUrl) {
+        return res.status(200).send(xml('')); // not a finished, real message
+      }
+
+      // Give the normal "action" path a head start. If it already handled this call, the call log says so.
+      await sleep(Number(process.env.CALLBACK_DELAY_MS) || 3000);
+      try {
+        await deliver({ params, digits, rec, baseUrl, mode: 'callback' });
+      } catch (e) {
+        console.error('CALLBACK DELIVERY FAILED:', e.message);
+        await alertOwner('Heartland Dispatch: hang-up delivery error', `${e.message}\nContractor digits: ${digits}`);
+      }
+      return res.status(200).send(xml(''));
+    }
+
+    // ---------- transcribed: optional follow-up email with the message as text ----------
+    if (step === 'transcribed') {
+      const digits = last10(params.contractor);
+      const rec = Number(params.rec) || 1;
+      if (!sigOk(params.sig, 'transcribed', digits, rec, String(params.tok || ''))) return res.status(403).send(xml(''));
+      console.log('TRANSCRIPTION CALLBACK:', JSON.stringify(params).slice(0, 1500));
+
+      const text = first(
+        params.TranscriptionText,
+        params.transcription_text,
+        params.data?.payload?.transcription_text,
+        params.data?.payload?.transcription,
+        params.data?.payload?.text
+      );
+      if (text && process.env.RESEND_API_KEY) {
         try {
-          const resend = new Resend(process.env.RESEND_API_KEY);
-          await resend.emails.send({
-            from: 'Heartland Dispatch <onboarding@resend.dev>',
-            to: contractorEmail,
-            subject: `🚨 Emergency Call Alert from ${callerNumber}`,
-            html: `
-              <div style="font-family: Arial, sans-serif; padding: 20px; color: #333; max-width: 500px; border: 1px solid #eee;">
-                <h2 style="color: #d9534f; text-transform: uppercase;">🚨 Emergency Dispatch Alert</h2>
-                <p>Hello <strong>${clientName}</strong>,</p>
-                <p>An urgent call was placed to your after-hours dispatch line.</p>
-                <div style="background-color: #f9f9f9; padding: 15px; margin: 15px 0; font-family: monospace;">
-                  <p style="margin: 4px 0;"><strong>Caller Phone:</strong> ${callerNumber}</p>
-                  <p style="margin: 4px 0;"><strong>Keypad Matched:</strong> ${cleanDigits}</p>
-                  <p style="margin: 4px 0;"><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
-                  ${recordingUrl ? `<p style="margin: 10px 0 4px 0;"><strong>Voice Summary Audio:</strong> <a href="${recordingUrl}" target="_blank" style="color: #0275d8;">Listen To Audio Recording</a></p>` : ''}
-                </div>
-              </div>
-            `
-          });
-          console.log('[RESEND] Email sent successfully.');
-        } catch (mailErr) {
-          console.error('[RESEND ERROR]', mailErr);
+          const client = await findClient(digits);
+          if (client?.email) {
+            const resend = new Resend(process.env.RESEND_API_KEY);
+            await withTimeout(
+              resend.emails.send({
+                from: process.env.RESEND_FROM || 'Heartland Dispatch <onboarding@resend.dev>',
+                to: client.email,
+                subject: `Message from ${pretty(params.caller)}, as text`,
+                text: `What the caller said:\n\n${text}`,
+                html: `<div style="font-family: Arial, sans-serif; max-width: 520px; padding: 20px;"><p style="color:#666;margin:0 0 8px;">What the caller said (automatic transcript, may contain mistakes):</p><p style="font-size:16px;line-height:1.5;">${esc(text)}</p></div>`,
+              }),
+              7000,
+              'transcript email'
+            );
+          }
+        } catch (e) {
+          console.error('TRANSCRIPT EMAIL FAILED:', e.message);
         }
       }
-
-      // Telnyx Outbound Call (Non-fatal)
-      if (forwardNumber && process.env.TELNYX_API_KEY) {
-        try {
-          const targetNumber = String(forwardNumber).split(',')[0].trim();
-          const cleanTo = targetNumber.startsWith('+') ? targetNumber : `+1${targetNumber}`;
-          const cleanFrom = masterTelnyxNumber.length > 3 ? masterTelnyxNumber : '+16155550199';
-
-          await fetch('https://api.telnyx.com/v2/calls', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              connection_id: process.env.TELNYX_CONNECTION_ID || '',
-              to: cleanTo,
-              from: cleanFrom,
-              webhook_url: `https://${host}/api/telnyx-webhook?step=outbound_alert`
-            })
-          });
-          console.log(`[TELNYX] Outbound call placed to ${cleanTo}`);
-        } catch (outboundErr) {
-          console.error('[TELNYX OUTBOUND ERROR]', outboundErr);
-        }
-      }
-
-      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">Our dispatch network has secured your emergency summary. Perfect! Our team will be with you as soon as possible. Goodbye.</Say>
-    <Hangup />
-</Response>`);
+      return res.status(200).send(xml(''));
     }
 
-    // ------------------------------------------------------------------
-    // STEP 2: Validate Digits & Prompt For Voice Recording
-    // ------------------------------------------------------------------
-    if (currentStep === 'validate' || (cleanDigits.length > 0 && currentStep !== 'record')) {
-      let contractorExists = false;
-
-      if (cleanDigits.length >= 10 && SUPABASE_KEY) {
-        const contractor = await getContractor(cleanDigits);
-        if (contractor) {
-          contractorExists = true;
-        }
+    // ---------- noinput: caller typed nothing ----------
+    if (step === 'noinput') {
+      const attempt = Number(params.attempt) || 1;
+      if (attempt >= 2) {
+        await claimCall(`${params.CallSid || ''}:gaveup`, { outcome: 'no_input' });
+        return res.status(200).send(hangupWith(SAY.gaveUpNoInput));
       }
-
-      // If invalid/not found, present retry gather prompt cleanly
-      if (!contractorExists) {
-        return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Gather action="${validateUrl}" method="POST" numDigits="10" timeout="12">
-        <Say voice="alice">We could not find an active contractor matching that phone number. Please double check and re-enter the 10-digit phone number on your keypad now.</Say>
-    </Gather>
-    <Say voice="alice">We did not receive a valid phone number. Thank you for calling Heartland Dispatch. Goodbye.</Say>
-    <Hangup />
-</Response>`);
-      }
-
-      // Successful validation: Play legal disclosure and trigger recording with digits passed in query string
-      const recordCallbackUrl = `https://${host}/api/telnyx-webhook?step=route&digits=${cleanDigits}`;
-      return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">Please note, this emergency message will be recorded and dispatched to your contractor. Please summarize your situation after the beep, and press 7 when you are finished.</Say>
-    <Record action="${recordCallbackUrl}" method="POST" maxLength="45" finishOnKey="7" playBeep="true" />
-    <Say voice="alice">Processing your transmission.</Say>
-</Response>`);
+      return res.status(200).send(askForNumber(SAY.noInput, attempt + 1));
     }
 
-    // ------------------------------------------------------------------
-    // STEP 1: Initial Inbound Greeting
-    // ------------------------------------------------------------------
-    const initialGatherUrl = `https://${host}/api/telnyx-webhook?step=validate`;
-    return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Gather action="${initialGatherUrl}" method="POST" numDigits="10" timeout="15">
-        <Say voice="alice">Thank you for calling Heartland Dispatch emergency service. Please enter your contractor's 10-digit phone number on your keypad now.</Say>
-    </Gather>
-    <Say voice="alice">We did not receive any keypad input. Thank you for calling Heartland Dispatch. Goodbye.</Say>
-    <Hangup />
-</Response>`);
+    // ---------- STEP 2: confirm (10 digits received: verify the contractor, say who we found) ----------
+    if (step === 'confirm') {
+      const attempt = Number(params.attempt) || 1;
+      const digits = last10(params.Digits || params.digits);
 
+      // First bad try: ask again. Second bad try: end the call.
+      const retryOrEnd = async (text, outcome) => {
+        if (attempt >= 2) {
+          await claimCall(`${params.CallSid || ''}:gaveup`, { outcome, contractor_phone: digits || null });
+          return hangupWith(SAY.gaveUpNotFound);
+        }
+        return askForNumber(text, attempt + 1);
+      };
+
+      if (digits.length !== 10) return res.status(200).send(await retryOrEnd(SAY.badLength, 'bad_number'));
+
+      let client = null;
+      try {
+        client = await findClient(digits);
+      } catch (e) {
+        console.error('LOOKUP FAILED:', e.message);
+        await alertOwner('Heartland Dispatch: database lookup failed', e.message);
+        return res.status(200).send(hangupWith(SAY.failure));
+      }
+      if (!client) return res.status(200).send(await retryOrEnd(SAY.notFound, 'not_found'));
+
+      const name = client.client_name ? esc(client.client_name) : spokenDigits(digits);
+      const recordUrl = `${baseUrl}?step=record&contractor=${digits}`;
+
+      // No button needed to continue: if they press nothing for 3 seconds, we move on. Pressing 2 re-enters.
+      return res.status(200).send(
+        xml(`<Gather action="${esc(recordUrl)}" method="POST" numDigits="1" timeout="3">
+    ${say(`Connecting you to ${name}. If that is not right, press 2.`)}
+</Gather>
+<Redirect method="POST">${esc(recordUrl)}</Redirect>`)
+      );
+    }
+
+    // ---------- STEP 3: record ----------
+    if (step === 'record') {
+      const choice = String(params.Digits || params.digits || '').trim();
+      const digits = last10(params.contractor);
+
+      if (digits.length !== 10 || choice === '2') {
+        return res.status(200).send(askForNumber(SAY.again, 1));
+      }
+      return res.status(200).send(recordXml(digits, 1, SAY.record));
+    }
+
+    // ---------- STEP 1: greeting + ask for the contractor's number ----------
+    return res.status(200).send(askForNumber(SAY.first, 1));
   } catch (error) {
-    console.error('[CRITICAL WEBHOOK CRASH]', error);
-    return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">An error occurred while processing your call. Please try again later.</Say>
-    <Hangup />
-</Response>`);
+    console.error('TOP-LEVEL ERROR:', error);
+    await alertOwner('Heartland Dispatch: unhandled error in call flow', error?.stack || String(error));
+    return res.status(200).send(hangupWith(SAY.failure));
   }
 }
