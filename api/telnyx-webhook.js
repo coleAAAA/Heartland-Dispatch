@@ -155,9 +155,9 @@ const SAY = {
   first:
     'Heartland Dispatch emergency line. If anyone is in danger, hang up and dial 9 1 1. Otherwise, enter the 10 digit phone number of the contractor you called.',
   noInput: 'Sorry, I did not catch that. Please enter the 10 digit phone number of the contractor you called.',
-  badLength: 'That was not 10 digits. Please try again.',
-  notFound: 'We could not find that number. Please try again.',
-  again: 'No problem. Please enter the number again.',
+  badLength: 'That was not 10 digits. Please enter all 10 digits again, from the beginning.',
+  notFound: 'We could not find that number. Please enter all 10 digits again, from the beginning.',
+  again: 'No problem. Please enter all 10 digits again, from the beginning.',
   record:
     'This call is recorded, and by staying on the line you agree to that. After the beep, say your name, your phone number, your address, and what is wrong. Press any key when you are done.',
   silent: 'I did not hear anything. After the beep, please say what is wrong. Press any key when you are done.',
@@ -169,7 +169,9 @@ const SAY = {
     'We are sorry, our system could not reach the contractor. Please call the contractor directly. If anyone is in danger, hang up and dial 9 1 1.',
 };
 
-const say = (text) => `<Say voice="alice">${text}</Say>`;
+// One voice for everything. Set TTS_VOICE in Vercel to change it without touching code (for example "alice" to go back to the old one).
+const VOICE = process.env.TTS_VOICE || 'Polly.Joanna-Neural';
+const say = (text) => `<Say voice="${VOICE}">${text}</Say>`;
 const hangupWith = (text) => xml(`${say(text)}\n<Hangup />`);
 
 // ---------- the alert email ----------
@@ -302,7 +304,9 @@ async function deliver({ params, digits, rec, baseUrl, mode }) {
           body: JSON.stringify({
             To: to,
             From: fromNumber,
-            Url: `${baseUrl}?step=outbound_alert&caller=${encodeURIComponent(callerNumber)}`,
+            Url: `${baseUrl}?step=outbound_alert&caller=${encodeURIComponent(callerNumber)}&company=${encodeURIComponent(clientName)}${
+              recordingUrl ? `&audio=${encodeURIComponent(recordingUrl)}` : ''
+            }`,
           }),
           signal: AbortSignal.timeout(6000),
         })
@@ -390,7 +394,7 @@ export default async function handler(req, res) {
 
     // Ask for the contractor's number. If nothing is typed, Telnyx falls through to the Redirect (step=noinput).
     const askForNumber = (text, attempt = 1) =>
-      xml(`<Gather action="${esc(`${baseUrl}?step=confirm&attempt=${attempt}`)}" method="POST" numDigits="10" timeout="15">
+      xml(`<Gather action="${esc(`${baseUrl}?step=confirm&attempt=${attempt}`)}" method="POST" numDigits="10" timeout="8">
     ${say(text)}
 </Gather>
 <Redirect method="POST">${esc(`${baseUrl}?step=noinput&attempt=${attempt}`)}</Redirect>`);
@@ -422,13 +426,24 @@ export default async function handler(req, res) {
 
     // ---------- outbound_alert: what the contractor hears when they pick up ----------
     if (step === 'outbound_alert') {
+      // This plays whether the contractor answers OR it rolls to their voicemail, so it has to make sense on its own.
       const spoken = spokenDigits(params.caller) || 'unknown';
-      return res.status(200).send(
-        xml(`<Say>Heartland Dispatch alert. A customer needs a call back. Their number is ${esc(spoken)}. Again, ${esc(
-          spoken
-        )}. Check your email to hear their message. Goodbye.</Say>
-<Hangup />`)
-      );
+      const company = String(params.company || '').slice(0, 60);
+      const intro = company
+        ? `This is Heartland Dispatch with an emergency call alert for ${esc(company)}.`
+        : 'This is Heartland Dispatch with an emergency call alert.';
+      // Play their actual message right on the call (and into voicemail if it rolls there), then repeat the number.
+      const audio = /^https:\/\//i.test(String(params.audio || '')) ? String(params.audio) : '';
+      const body = audio
+        ? `${say(`${intro} A customer called while you were unavailable. Their number is ${esc(spoken)}. Here is their message.`)}
+<Play>${esc(audio)}</Play>
+${say(`That was the message. Their number again is ${esc(spoken)}. The recording is also in your email. Please call them back as soon as you can. Goodbye.`)}`
+        : say(
+            `${intro} A customer called while you were unavailable and left a message. Their number is ${esc(spoken)}. Again, ${esc(
+              spoken
+            )}. The recording was just sent to your email. Please call them back as soon as you can. Goodbye.`
+          );
+      return res.status(200).send(xml(`${body}\n<Hangup />`));
     }
 
     // ---------- STEP 4: route (the caller finished recording and is still on the line) ----------
