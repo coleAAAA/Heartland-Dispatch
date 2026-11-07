@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>You're in | Heartland Dispatch</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0a0a'/%3E%3Cpath d='M9 8v16M23 8v16M9 16h14' stroke='white' stroke-width='3.5' fill='none'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="/">Heartland Dispatch</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="wrap center-page" style="max-width: 720px;">
+      <div class="check-badge" aria-hidden="true">&#10003;</div>
+      <h1 class="display" style="font-size: clamp(2rem, 6vw, 3rem); max-width: none;">You're in. Your trial has started.</h1>
+      <p class="lead">Three quick steps and you're covered. We also emailed you these steps with your own number filled in, so check your inbox (and spam or promotions, just in case).</p>
+
+      <ol class="todo">
+        <li>
+          <h3>Add this line to your voicemail greeting and website</h3>
+          <p>This is how customers know to use us when you can't pick up.</p>
+          <div class="linebox">
+            <p>&ldquo;For emergencies, call 615-640-8506 and enter our number: <span id="yourNum">[your number]</span>.&rdquo;</p>
+            <button type="button" class="btn btn-ghost btn-sm" id="copyLine">Copy line</button>
+          </div>
+        </li>
+        <li>
+          <h3>Test it from a different phone</h3>
+          <p>Call <strong>615-640-8506</strong>, key in your 10-digit number, and leave a short message. Your phone should ring and an email should arrive with the recording. If anything looks off, reply to our email and we'll fix it.</p>
+        </li>
+        <li>
+          <h3>Save 615-640-8506 in your contacts</h3>
+          <p>So the alert call shows up as &ldquo;Heartland Dispatch&rdquo; and doesn't get mistaken for spam.</p>
+        </li>
+      </ol>
+
+      <p class="fineprint">Your card won't be charged for 10 days. To cancel or change your phone numbers, email <a href="mailto:coleeritter@gmail.com">coleeritter@gmail.com</a>.</p>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div><strong>Heartland Dispatch</strong></div>
+      <div><a href="mailto:coleeritter@gmail.com">coleeritter@gmail.com</a> &nbsp;&middot;&nbsp; <a href="/terms.html">Terms</a> &nbsp;&middot;&nbsp; <a href="/privacy.html">Privacy</a></div>
+    </div>
+  </footer>
+
+  <script>
+  (function () {
+    // If this browser just filled in the signup form, drop their number into the line.
+    var num = '';
+    try { num = (sessionStorage.getItem('hd_primaryPhone') || '').replace(/\D/g, ''); } catch (e) {}
+    if (num.length === 11 && num.charAt(0) === '1') num = num.slice(1);
+    var shown = num.length === 10 ? num.slice(0, 3) + '-' + num.slice(3, 6) + '-' + num.slice(6) : '';
+    if (shown) document.getElementById('yourNum').textContent = shown;
+
+    document.getElementById('copyLine').addEventListener('click', function () {
+      var text = 'For emergencies, call 615-640-8506 and enter our number: ' + (shown || '[YOUR NUMBER]') + '.';
+      var b = this;
+      function done() { var old = b.textContent; b.textContent = 'Copied'; setTimeout(function () { b.textContent = old; }, 2000); }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, done); else done();
+    });
+  })();
+  </script>
+</body>
+</html>
