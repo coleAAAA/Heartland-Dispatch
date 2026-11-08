@@ -21,6 +21,7 @@ export const config = {
 const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
 const DISPATCH_NUMBER_PRETTY = '615-640-8506';
 const SUPPORT_DEFAULT = 'coleeritter@gmail.com';
+const BILLING_URL = 'https://billing.stripe.com/p/login/14AfZ94a49dg9bkcmA0sU00'; // Stripe customer portal: cancel / update card
 
 const esc = (s) =>
   String(s ?? '')
@@ -135,6 +136,8 @@ DO THIS NEXT (2 minutes):
 3. Keep our emails in your inbox: if this landed in Promotions, Spam or All Mail, drag it to your Primary tab and add dispatch@heartlanddispatch.app to your contacts. Your emergency alerts come from that same address.
 4. Reply to this email if anything looks wrong. A real person reads it.
 
+Cancel or update your card any time: ${BILLING_URL}
+
 Support: ${support}`;
 
   const html = `
@@ -150,7 +153,8 @@ Support: ${support}`;
     <p style="margin: 0 0 6px; font-weight: bold;">3. Keep our emails in your inbox</p>
     <p style="margin: 0 0 20px; color: #333;">If this email landed in Promotions, Spam or All Mail, drag it to your <strong>Primary</strong> tab and add <strong>dispatch@heartlanddispatch.app</strong> to your contacts. Your emergency alerts come from that same address.</p>
     <p style="margin: 0 0 6px; font-weight: bold;">4. Anything look wrong?</p>
-    <p style="margin: 0 0 24px; color: #333;">Just reply to this email. A real person reads it.</p>
+    <p style="margin: 0 0 20px; color: #333;">Just reply to this email. A real person reads it.</p>
+    <p style="margin: 0 0 24px; color: #333;">Cancel or update your card any time: <a href="${esc(BILLING_URL)}">manage your billing</a>.</p>
     <p style="color: #777; font-size: 13px; margin: 0;">Support: <a href="mailto:${esc(support)}">${esc(support)}</a></p>
   </div>`;
 
