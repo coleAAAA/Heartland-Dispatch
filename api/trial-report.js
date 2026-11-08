@@ -22,6 +22,7 @@ const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
 const DISPATCH_NUMBER_PRETTY = '615-640-8506';
 const SUPPORT_DEFAULT = 'coleeritter@gmail.com';
 const PRICE = '$250';
+const BILLING_URL = 'https://billing.stripe.com/p/login/14AfZ94a49dg9bkcmA0sU00'; // Stripe customer portal: cancel / update card
 const TIP =
   'Tip: if our emails land in Promotions, Spam or All Mail, drag one to your Primary tab and add dispatch@heartlanddispatch.app to your contacts so you never miss one.';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -154,7 +155,7 @@ function buildReport({ client, calls, tests, trialEnd, support, extendedTo, exte
   const line = `For emergencies, call ${DISPATCH_NUMBER_PRETTY} and enter our number: ${myNumber}`;
   const endStr = dayStr(extendedTo || trialEnd);
   const endSentence = `Your free trial ends on ${endStr}. After that it is ${PRICE}/month, charged to the card you gave us at signup.`;
-  const cancelSentence = `To cancel, just reply to this email and say "cancel". There is no contract.`;
+  const cancelSentence = `To cancel or update your card, use ${BILLING_URL} or just reply "cancel". There is no contract.`;
 
   const n = calls.length;
   const testNote = tests.length
@@ -206,7 +207,7 @@ Support: ${support}`;
     ${testNote ? `<p style="color:#777;font-size:13px;margin:8px 0 0;">${esc(testNote)}</p>` : ''}
     <p style="margin: 20px 0; color:#333;">If any of these turned into work, that is the line doing its job. If you have not called them back yet, do it now.</p>
     <p style="margin: 0 0 6px; color:#333;">${esc(endSentence)}</p>
-    <p style="margin: 0 0 20px; color:#333;">${esc(cancelSentence)}</p>
+    <p style="margin: 0 0 20px; color:#333;">To cancel or update your card, <a href="${esc(BILLING_URL)}">manage your billing here</a> or just reply &ldquo;cancel&rdquo;. There is no contract.</p>
     <p style="margin: 0; color:#333;">How is it going? Hit reply and tell us. A real person reads every response.</p>
     <p style="color:#777;font-size:13px;margin:20px 0 0;">${esc(TIP)}</p>
     <p style="color:#777;font-size:13px;margin:8px 0 0;">Support: <a href="mailto:${esc(support)}">${esc(support)}</a></p>
@@ -234,6 +235,8 @@ ${endSentence}
 
 ${offerText}
 
+Manage or cancel any time: ${BILLING_URL}
+
 ${TIP}
 
 Support: ${support}`;
@@ -251,6 +254,7 @@ Support: ${support}`;
     ${testNote ? `<p style="color:#777;font-size:13px;margin:0 0 14px;">${esc(testNote)}</p>` : ''}
     <p style="margin: 0 0 14px; color:#333;">${esc(endSentence)}</p>
     <p style="margin: 0 0 20px; color:#333;"><strong>${esc(offerText.split('. If you would rather')[0])}.</strong> If you would rather cancel, reply &ldquo;cancel&rdquo;. There is no contract.</p>
+    <p style="color:#777;font-size:13px;margin:0 0 8px;">Manage or cancel any time: <a href="${esc(BILLING_URL)}">billing page</a>.</p>
     <p style="color:#777;font-size:13px;margin:0 0 8px;">${esc(TIP)}</p>
     <p style="color:#777;font-size:13px;margin:0;">Support: <a href="mailto:${esc(support)}">${esc(support)}</a></p>
   </div>`;
@@ -380,6 +384,9 @@ export default async function handler(req, res) {
         text: `${e.message}\n\nMost likely the new columns are missing. Run supabase-setup.sql again.`,
       });
     }
+    return res.status(500).json({ ok: false });
+  }
+}
     return res.status(500).json({ ok: false });
   }
 }
