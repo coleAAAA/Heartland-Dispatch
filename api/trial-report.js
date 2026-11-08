@@ -10,6 +10,11 @@
 //   RESEND_FROM    verified sender, e.g. Heartland Dispatch <dispatch@heartlanddispatch.app>
 //   TRIAL_DAYS     optional, default 10 (must match your Stripe trial length)
 //   REPORT_AFTER_DAYS  optional, default 7
+//   STRIPE_SECRET_KEY  needed for the automatic trial extension (Stripe -> Developers -> API keys -> Secret key).
+//                  Test mode needs the sk_test_ key, live mode needs the sk_live_ key. Without it, the report still goes out
+//                  and the email just says "reply and we will extend your trial".
+//   EXTEND_DAYS    optional, default 7: how many free days a customer with zero captured calls gets (once)
+//   AUTO_EXTEND    optional: set to "false" to turn the automatic extension off
 
 import { Resend } from 'resend';
 
@@ -90,12 +95,62 @@ async function sendMail({ to, subject, text, html, replyTo }) {
   }
 }
 
+// ---------- Stripe: automatic one-time trial extension ----------
+async function stripeApi(method, path, form, idempotencyKey) {
+  const r = await fetch(`https://api.stripe.com/v1/${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+      ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+    },
+    body: form ? new URLSearchParams(form).toString() : undefined,
+    signal: AbortSignal.timeout(8000),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`Stripe ${method} ${path} failed ${r.status}: ${j?.error?.message || ''}`);
+  return j;
+}
+
+// Returns the new trial end date if the customer's trial was extended (now or earlier), or null if there was nothing to do.
+// Throws if Stripe or the database fails (the caller falls back to the "reply and we will extend" wording).
+async function extendTrial(client, extendDays, nowMs) {
+  if (!process.env.STRIPE_SECRET_KEY || !client.stripe_subscription_id) return null;
+
+  const sub = await stripeApi('GET', `subscriptions/${client.stripe_subscription_id}`);
+  if (sub.status !== 'trialing' || !sub.trial_end) return null; // trial is already over, or this is not a trial: leave it alone
+
+  // Claim the extension first so it can only ever happen once per customer, even if two runs overlap
+  const claimed = await db(
+    'PATCH',
+    'clients',
+    { id: `eq.${client.id}`, trial_extended_at: 'is.null' },
+    { trial_extended_at: new Date(nowMs).toISOString() }
+  );
+  if (claimed.length === 0) return new Date(sub.trial_end * 1000); // already extended earlier
+
+  const newEndSec = Math.floor((Math.max(sub.trial_end * 1000, nowMs) + extendDays * DAY_MS) / 1000);
+  try {
+    await stripeApi(
+      'POST',
+      `subscriptions/${sub.id}`,
+      { trial_end: String(newEndSec), proration_behavior: 'none' },
+      `hd-extend-${client.id}`
+    );
+  } catch (e) {
+    // Give the claim back so a later run can try again
+    await db('PATCH', 'clients', { id: `eq.${client.id}` }, { trial_extended_at: null }).catch(() => {});
+    throw e;
+  }
+  return new Date(newEndSec * 1000);
+}
+
 // ---------- the report email ----------
-function buildReport({ client, calls, tests, trialEnd, support }) {
+function buildReport({ client, calls, tests, trialEnd, support, extendedTo, extendDays }) {
   const name = client.client_name || 'your company';
   const myNumber = dashed(client.contractor_phone);
   const line = `For emergencies, call ${DISPATCH_NUMBER_PRETTY} and enter our number: ${myNumber}`;
-  const endStr = dayStr(trialEnd);
+  const endStr = dayStr(extendedTo || trialEnd);
   const endSentence = `Your free trial ends on ${endStr}. After that it is ${PRICE}/month, charged to the card you gave us at signup.`;
   const cancelSentence = `To cancel, just reply to this email and say "cancel". There is no contract.`;
 
@@ -155,7 +210,12 @@ Support: ${support}`;
   }
 
   // No real messages yet: be honest, make sure it is set up, and make the offer.
-  const subject = `Your first week: no messages yet (here is how to make sure it works)`;
+  const offerText = extendedTo
+    ? `Because your line has not caught a real call yet, we extended your free trial by ${extendDays} days at no charge, so you get a fair look at it working. If you would rather cancel, reply "cancel". There is no contract.`
+    : `If your line has not caught a real call by then, reply to this email and we will extend your trial until it has. If you would rather cancel, reply "cancel". There is no contract.`;
+  const subject = extendedTo
+    ? `Your first week: no messages yet, so we extended your trial`
+    : `Your first week: no messages yet (here is how to make sure it works)`;
   const text = `Hi ${name},
 
 Nobody has left a message on your Heartland Dispatch line yet. That can simply mean a quiet week. It also means you have not seen it work yet, so here is how to be sure it is ready:
@@ -167,7 +227,7 @@ ${testNote}
 
 ${endSentence}
 
-If your line has not caught a real call by then, reply to this email and we will extend your trial until it has. If you would rather cancel, reply "cancel". There is no contract.
+${offerText}
 
 Support: ${support}`;
 
@@ -183,7 +243,7 @@ Support: ${support}`;
     )}</strong>, and leave a message. You should get a phone call and an email.</p>
     ${testNote ? `<p style="color:#777;font-size:13px;margin:0 0 14px;">${esc(testNote)}</p>` : ''}
     <p style="margin: 0 0 14px; color:#333;">${esc(endSentence)}</p>
-    <p style="margin: 0 0 20px; color:#333;"><strong>If your line has not caught a real call by then, reply to this email and we will extend your trial until it has.</strong> If you would rather cancel, reply &ldquo;cancel&rdquo;. There is no contract.</p>
+    <p style="margin: 0 0 20px; color:#333;"><strong>${esc(offerText.split('. If you would rather')[0])}.</strong> If you would rather cancel, reply &ldquo;cancel&rdquo;. There is no contract.</p>
     <p style="color:#777;font-size:13px;margin:0;">Support: <a href="mailto:${esc(support)}">${esc(support)}</a></p>
   </div>`;
   return { subject, text, html };
@@ -200,16 +260,17 @@ export default async function handler(req, res) {
   const support = process.env.SUPPORT_EMAIL || SUPPORT_DEFAULT;
   const trialDays = Number(process.env.TRIAL_DAYS) || 10;
   const afterDays = Number(process.env.REPORT_AFTER_DAYS) || 7;
+  const extendDays = Number(process.env.EXTEND_DAYS) || 7;
   const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
 
-  const summary = { checked: 0, sent: 0, failed: 0 };
+  const summary = { checked: 0, sent: 0, failed: 0, extended: 0 };
   const digest = [];
 
   try {
     // Active customers who started their trial at least a week ago (but not ages ago), and have not had a report yet.
     const due = await db('GET', 'clients', {
-      select: 'id,client_name,email,contractor_phone,forward_number,activated_at',
+      select: 'id,client_name,email,contractor_phone,forward_number,activated_at,stripe_subscription_id,trial_extended_at',
       status: 'eq.active',
       trial_report_sent_at: 'is.null',
       and: `(activated_at.lte.${iso(now - afterDays * DAY_MS)},activated_at.gte.${iso(now - 30 * DAY_MS)})`,
@@ -246,7 +307,21 @@ export default async function handler(req, res) {
         const tests = rows.filter((c) => own.has(last10(c.caller_number)));
 
         const trialEnd = new Date(new Date(client.activated_at).getTime() + trialDays * DAY_MS);
-        const mail = buildReport({ client, calls, tests, trialEnd, support });
+
+        // Nobody has left a real message yet: give them extra free days automatically (once), so they get a fair look.
+        let extendedTo = null;
+        let extendNote = '';
+        if (calls.length === 0 && process.env.AUTO_EXTEND !== 'false') {
+          try {
+            extendedTo = await extendTrial(client, extendDays, now);
+            if (extendedTo) summary.extended++;
+          } catch (e) {
+            console.error('TRIAL EXTEND FAILED:', client.id, e.message);
+            extendNote = `  (auto-extend FAILED: ${e.message.slice(0, 120)})`;
+          }
+        }
+
+        const mail = buildReport({ client, calls, tests, trialEnd, support, extendedTo, extendDays });
 
         const ok = await sendMail({ to: client.email, replyTo: support, ...mail });
         if (!ok) {
@@ -259,7 +334,11 @@ export default async function handler(req, res) {
         digest.push(
           `${client.client_name || '(no name)'} <${client.email}>: ${calls.length} message${calls.length === 1 ? '' : 's'}${
             tests.length ? ` (+${tests.length} own-phone test)` : ''
-          }, trial ends ${dayStr(trialEnd)}${calls.length === 0 ? '  <- ZERO. Consider reaching out personally.' : ''}`
+          }, trial ends ${dayStr(extendedTo || trialEnd)}${
+            calls.length === 0
+              ? `  <- ZERO. ${extendedTo ? `Trial auto-extended ${extendDays} days. ` : ''}Consider reaching out personally.`
+              : ''
+          }${extendNote}`
         );
       } catch (e) {
         console.error('TRIAL REPORT customer error:', client.id, e.message);
@@ -291,6 +370,9 @@ export default async function handler(req, res) {
         text: `${e.message}\n\nMost likely the new columns are missing. Run supabase-setup.sql again.`,
       });
     }
+    return res.status(500).json({ ok: false });
+  }
+}
     return res.status(500).json({ ok: false });
   }
 }
