@@ -132,7 +132,8 @@ DO THIS NEXT (2 minutes):
 1. Add this line to your voicemail greeting and your website:
    "${line}"
 2. Test it: call ${DISPATCH_NUMBER_PRETTY} from a different phone, enter ${last10(row.contractor_phone)}, and leave a message. You should get a phone call and an email shortly after.
-3. Reply to this email if anything looks wrong. A real person reads it.
+3. Keep our emails in your inbox: if this landed in Promotions, Spam or All Mail, drag it to your Primary tab and add dispatch@heartlanddispatch.app to your contacts. Your emergency alerts come from that same address.
+4. Reply to this email if anything looks wrong. A real person reads it.
 
 Support: ${support}`;
 
@@ -146,7 +147,9 @@ Support: ${support}`;
     <p style="margin: 0 0 20px; color: #333;">Call <strong>${esc(DISPATCH_NUMBER_PRETTY)}</strong> from a different phone, enter <strong>${esc(
       last10(row.contractor_phone)
     )}</strong>, and leave a message. You should get a phone call and an email shortly after.</p>
-    <p style="margin: 0 0 6px; font-weight: bold;">3. Anything look wrong?</p>
+    <p style="margin: 0 0 6px; font-weight: bold;">3. Keep our emails in your inbox</p>
+    <p style="margin: 0 0 20px; color: #333;">If this email landed in Promotions, Spam or All Mail, drag it to your <strong>Primary</strong> tab and add <strong>dispatch@heartlanddispatch.app</strong> to your contacts. Your emergency alerts come from that same address.</p>
+    <p style="margin: 0 0 6px; font-weight: bold;">4. Anything look wrong?</p>
     <p style="margin: 0 0 24px; color: #333;">Just reply to this email. A real person reads it.</p>
     <p style="color: #777; font-size: 13px; margin: 0;">Support: <a href="mailto:${esc(support)}">${esc(support)}</a></p>
   </div>`;
