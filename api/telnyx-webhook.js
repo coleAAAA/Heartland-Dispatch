@@ -200,6 +200,30 @@ function buildAlertEmail({ clientName, prettyCaller, callbackTel, timeStr, recor
   return { text, html };
 }
 
+// ---------- keep the recording permanently ----------
+// Telnyx's own recording links stop working after 10 minutes. So right after a message is recorded, we copy the audio into a
+// storage bucket named "recordings" in Supabase (public bucket, random unguessable file names) and use THAT link in the
+// email and the call log. If anything goes wrong we return null and the Telnyx link is used instead (it still works for 10 minutes).
+async function saveRecording(recordingUrl) {
+  const key = process.env.SUPABASE_SUPER_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key || !recordingUrl) return null;
+  const src = await fetch(recordingUrl, { signal: AbortSignal.timeout(3000) });
+  if (!src.ok) throw new Error(`download failed ${src.status}`);
+  const type = (src.headers.get('content-type') || 'audio/mpeg').split(';')[0].trim();
+  const audio = Buffer.from(await src.arrayBuffer());
+  if (audio.length === 0 || audio.length > 10 * 1024 * 1024) throw new Error(`unexpected size ${audio.length}`);
+  const ext = /wav/i.test(type) ? 'wav' : 'mp3';
+  const path = `${new Date().toISOString().slice(0, 10)}/${crypto.randomBytes(16).toString('hex')}.${ext}`;
+  const up = await fetch(`${SUPABASE_BASE_URL}/storage/v1/object/recordings/${path}`, {
+    method: 'POST',
+    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': type, 'x-upsert': 'true' },
+    body: audio,
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!up.ok) throw new Error(`upload failed ${up.status}: ${(await up.text()).slice(0, 200)}`);
+  return `${SUPABASE_BASE_URL}/storage/v1/object/public/recordings/${path}`;
+}
+
 // ---------- alert the contractor (email + every registered phone). Never throws. ----------
 async function deliver({ params, digits, rec, baseUrl, mode }) {
   // mode "action": the caller is still on the line (fail open if the call log is unavailable)
@@ -255,28 +279,40 @@ async function deliver({ params, digits, rec, baseUrl, mode }) {
   // Each task resolves to { channel, ok }.
   const tasks = [];
 
+  // Copy the recording to permanent storage in the background. The phone alerts start right away with the Telnyx link
+  // (they play within seconds); only the email waits for the permanent link, and gives up after 3.5 seconds.
+  const savedPromise = recordingUrl
+    ? withTimeout(saveRecording(recordingUrl), 3500, 'save recording').catch((e) => {
+        console.error('SAVE RECORDING FAILED (using the Telnyx link instead):', e.message);
+        return null;
+      })
+    : Promise.resolve(null);
+
   if (client.email && process.env.RESEND_API_KEY) {
     const resend = new Resend(process.env.RESEND_API_KEY);
-    const mail = buildAlertEmail({
-      clientName,
-      prettyCaller,
-      callbackTel: toE164(callerNumber),
-      timeStr,
-      recordingUrl,
-      seconds,
-    });
     tasks.push(
-      withTimeout(
-        resend.emails.send({
-          from: process.env.RESEND_FROM || 'Heartland Dispatch <onboarding@resend.dev>',
-          to: client.email,
-          subject: `🚨 Emergency call from ${prettyCaller} - call back now`,
-          text: mail.text,
-          html: mail.html,
-        }),
-        7000,
-        'email'
-      )
+      savedPromise
+        .then((savedUrl) => {
+          const mail = buildAlertEmail({
+            clientName,
+            prettyCaller,
+            callbackTel: toE164(callerNumber),
+            timeStr,
+            recordingUrl: savedUrl || recordingUrl,
+            seconds,
+          });
+          return withTimeout(
+            resend.emails.send({
+              from: process.env.RESEND_FROM || 'Heartland Dispatch <onboarding@resend.dev>',
+              to: client.email,
+              subject: `🚨 Emergency call from ${prettyCaller} - call back now`,
+              text: mail.text,
+              html: mail.html,
+            }),
+            7000,
+            'email'
+          );
+        })
         .then(({ data, error }) => {
           // Resend does NOT throw on API errors; it returns { error }
           if (error) {
@@ -328,8 +364,14 @@ async function deliver({ params, digits, rec, baseUrl, mode }) {
   const channels = [...new Set(results.filter((r) => r.ok).map((r) => r.channel))];
   const outcome = channels.length ? 'delivered' : 'failed';
 
+  const savedUrl = await savedPromise; // already finished (the email waited for it); null if saving failed
+
   await Promise.all([
-    updateCall(callSid, { outcome, channels: channels.join('+') || null }),
+    updateCall(callSid, {
+      outcome,
+      channels: channels.join('+') || null,
+      ...(savedUrl ? { recording_url: savedUrl } : {}), // the day-7 report links to this, so it must be the permanent one
+    }),
     outcome === 'failed'
       ? alertOwner(
           'Heartland Dispatch: alert NOT delivered',
