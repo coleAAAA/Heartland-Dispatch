@@ -179,7 +179,7 @@ function buildAlertEmail({ clientName, prettyCaller, callbackTel, timeStr, recor
   const length = Number.isFinite(seconds) && seconds > 0 ? ` (${Math.round(seconds)} sec)` : '';
   const text = `Emergency call for ${clientName}.\nCaller: ${prettyCaller}\nTime: ${timeStr}\n${
     recordingUrl ? `Listen${length}: ${recordingUrl}` : 'No message was recorded. Call the number above.'
-  }`;
+  }\n\nTip: if our alerts land in Promotions, Spam or All Mail, drag one to your Primary tab and add dispatch@heartlanddispatch.app to your contacts.`;
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 520px; padding: 20px;">
       <h2 style="margin: 0 0 8px;">🚨 Emergency call for ${esc(clientName)}</h2>
@@ -196,6 +196,7 @@ function buildAlertEmail({ clientName, prettyCaller, callbackTel, timeStr, recor
           ? `<p><a href="${esc(recordingUrl)}" style="display: inline-block; border: 2px solid #000; color: #000; padding: 12px 20px; text-decoration: none; font-weight: bold;">&#9654; Listen to their message${esc(length)}</a></p>`
           : '<p>No message was recorded. Please call the number above.</p>'
       }
+      <p style="color: #888; font-size: 12px; margin: 24px 0 0;">Tip: if our alerts land in Promotions, Spam or All Mail, drag one to your Primary tab and add dispatch@heartlanddispatch.app to your contacts.</p>
     </div>`;
   return { text, html };
 }
