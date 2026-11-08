@@ -22,6 +22,8 @@ const SUPABASE_BASE_URL = "https://oexjbmllasslcxfqprlq.supabase.co";
 const DISPATCH_NUMBER_PRETTY = '615-640-8506';
 const SUPPORT_DEFAULT = 'coleeritter@gmail.com';
 const PRICE = '$250';
+const TIP =
+  'Tip: if our emails land in Promotions, Spam or All Mail, drag one to your Primary tab and add dispatch@heartlanddispatch.app to your contacts so you never miss one.';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_PER_RUN = 10; // keeps each run well inside Vercel's time limit; anyone left over is picked up tomorrow
 
@@ -180,6 +182,8 @@ ${cancelSentence}
 
 How is it going? Hit reply and tell us. A real person reads every response.
 
+${TIP}
+
 Support: ${support}`;
 
     const rowsHtml = shown
@@ -204,7 +208,8 @@ Support: ${support}`;
     <p style="margin: 0 0 6px; color:#333;">${esc(endSentence)}</p>
     <p style="margin: 0 0 20px; color:#333;">${esc(cancelSentence)}</p>
     <p style="margin: 0; color:#333;">How is it going? Hit reply and tell us. A real person reads every response.</p>
-    <p style="color:#777;font-size:13px;margin:20px 0 0;">Support: <a href="mailto:${esc(support)}">${esc(support)}</a></p>
+    <p style="color:#777;font-size:13px;margin:20px 0 0;">${esc(TIP)}</p>
+    <p style="color:#777;font-size:13px;margin:8px 0 0;">Support: <a href="mailto:${esc(support)}">${esc(support)}</a></p>
   </div>`;
     return { subject, text, html };
   }
@@ -229,6 +234,8 @@ ${endSentence}
 
 ${offerText}
 
+${TIP}
+
 Support: ${support}`;
 
   const html = `
@@ -244,6 +251,7 @@ Support: ${support}`;
     ${testNote ? `<p style="color:#777;font-size:13px;margin:0 0 14px;">${esc(testNote)}</p>` : ''}
     <p style="margin: 0 0 14px; color:#333;">${esc(endSentence)}</p>
     <p style="margin: 0 0 20px; color:#333;"><strong>${esc(offerText.split('. If you would rather')[0])}.</strong> If you would rather cancel, reply &ldquo;cancel&rdquo;. There is no contract.</p>
+    <p style="color:#777;font-size:13px;margin:0 0 8px;">${esc(TIP)}</p>
     <p style="color:#777;font-size:13px;margin:0;">Support: <a href="mailto:${esc(support)}">${esc(support)}</a></p>
   </div>`;
   return { subject, text, html };
@@ -331,15 +339,17 @@ export default async function handler(req, res) {
           continue;
         }
         summary.sent++;
-        digest.push(
-          `${client.client_name || '(no name)'} <${client.email}>: ${calls.length} message${calls.length === 1 ? '' : 's'}${
-            tests.length ? ` (+${tests.length} own-phone test)` : ''
-          }, trial ends ${dayStr(extendedTo || trialEnd)}${
-            calls.length === 0
-              ? `  <- ZERO. ${extendedTo ? `Trial auto-extended ${extendDays} days. ` : ''}Consider reaching out personally.`
-              : ''
-          }${extendNote}`
-        );
+        const block = [
+          `${client.client_name || '(no name)'}`,
+          `Email: ${client.email}   Phone: ${dashed(client.contractor_phone)}`,
+          `Real messages: ${calls.length}${tests.length ? `   |   Own-phone tests: ${tests.length}` : ''}`,
+          `Trial ends: ${dayStr(extendedTo || trialEnd)}${extendedTo ? ` (auto-extended ${extendDays} days)` : ''}`,
+          calls.length === 0
+            ? 'Next step: reach out personally this week and help them get the voicemail line in place.'
+            : 'Next step: ask how it is going. Good moment to ask for a testimonial.',
+        ];
+        if (extendNote) block.push(extendNote.trim());
+        digest.push(block.join('\n'));
       } catch (e) {
         console.error('TRIAL REPORT customer error:', client.id, e.message);
         summary.failed++;
@@ -355,7 +365,7 @@ export default async function handler(req, res) {
       await sendMail({
         to: process.env.OWNER_EMAIL,
         subject: `Heartland Dispatch: ${digest.length} trial report${digest.length === 1 ? '' : 's'} sent today`,
-        text: digest.join('\n'),
+        text: digest.join('\n\n-----\n\n'),
       });
     }
 
