@@ -165,7 +165,7 @@ const SAY = {
   record:
     'This call is recorded, and by staying on the line you agree to that. After the beep, say your name, your phone number, your address, and what is wrong. Press any key when you are done.',
   demoRecord:
-    'Welcome to the demo. This call is recorded, and by staying on the line you agree to that. After the beep, pretend you are a customer with an emergency. Say what is wrong, then press any key and stay on the line. You will hear exactly what the contractor gets.',
+    'Welcome to the Heartland Dispatch demo. Quick heads up: this call is recorded so we can play your message back to you, and by staying on the line you are okay with that. After the beep, pretend you are a customer with a problem and say a quick message. Then press any key and stay on the line to hear exactly what a contractor gets.',
   silent: 'I did not hear anything. After the beep, please say what is wrong. Press any key when you are done.',
   gaveUpNoInput:
     'We did not get a number. Please call back and try again. If anyone is in danger, hang up and dial 9 1 1.',
