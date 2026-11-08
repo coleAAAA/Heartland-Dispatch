@@ -40,6 +40,10 @@ const spokenDigits = (s) => last10(s).split('').join(', ');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const first = (...vals) => vals.find((v) => typeof v === 'string' && v.trim() !== '') || '';
 
+// Demo line. When a prospect enters this number they hear the contractor's alert played back INSIDE their own call, so nothing
+// rings and nobody has to be awake. You just get an email with their number as a lead. Change it with DEMO_NUMBER in Vercel.
+const DEMO_DIGITS = last10(process.env.DEMO_NUMBER) || '3024390062';
+
 function withTimeout(promise, ms, label) {
   let t;
   return Promise.race([
@@ -160,6 +164,8 @@ const SAY = {
   again: 'No problem. Please enter all 10 digits again, from the beginning.',
   record:
     'This call is recorded, and by staying on the line you agree to that. After the beep, say your name, your phone number, your address, and what is wrong. Press any key when you are done.',
+  demoRecord:
+    'Welcome to the demo. This call is recorded, and by staying on the line you agree to that. After the beep, pretend you are a customer with an emergency. Say what is wrong, then press any key and stay on the line. You will hear exactly what the contractor gets.',
   silent: 'I did not hear anything. After the beep, please say what is wrong. Press any key when you are done.',
   gaveUpNoInput:
     'We did not get a number. Please call back and try again. If anyone is in danger, hang up and dial 9 1 1.',
@@ -175,15 +181,15 @@ const say = (text) => `<Say voice="${VOICE}">${text}</Say>`;
 const hangupWith = (text) => xml(`${say(text)}\n<Hangup />`);
 
 // ---------- the alert email ----------
-function buildAlertEmail({ clientName, prettyCaller, callbackTel, timeStr, recordingUrl, seconds }) {
+function buildAlertEmail({ clientName, prettyCaller, callbackTel, timeStr, recordingUrl, seconds, demo = false }) {
   const length = Number.isFinite(seconds) && seconds > 0 ? ` (${Math.round(seconds)} sec)` : '';
-  const text = `Emergency call for ${clientName}.\nCaller: ${prettyCaller}\nTime: ${timeStr}\n${
+  const text = `${demo ? 'DEMO LEAD: someone just tried the demo line. Follow up while it is fresh.' : `Emergency call for ${clientName}.`}\nCaller: ${prettyCaller}\nTime: ${timeStr}\n${
     recordingUrl ? `Listen${length}: ${recordingUrl}` : 'No message was recorded. Call the number above.'
   }\n\nTip: if our alerts land in Promotions, Spam or All Mail, drag one to your Primary tab and add dispatch@heartlanddispatch.app to your contacts.`;
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 520px; padding: 20px;">
-      <h2 style="margin: 0 0 8px;">🚨 Emergency call for ${esc(clientName)}</h2>
-      <p style="margin: 0 0 16px; color: #444;">A customer is waiting to hear back. Please call them as soon as you can.</p>
+      <h2 style="margin: 0 0 8px;">${demo ? '📞 Demo lead' : `🚨 Emergency call for ${esc(clientName)}`}</h2>
+      <p style="margin: 0 0 16px; color: #444;">${demo ? 'Someone just tried the demo line. Follow up while it is fresh.' : 'A customer is waiting to hear back. Please call them as soon as you can.'}</p>
       <p style="font-size: 20px; margin: 0 0 4px;"><strong>${esc(prettyCaller)}</strong></p>
       <p style="color: #666; margin: 0 0 16px;">${esc(timeStr)}</p>
       ${
@@ -259,7 +265,9 @@ async function deliver({ params, digits, rec, baseUrl, mode }) {
 
   const clientName = client.client_name || 'Contractor';
   // Every number on the account (primary + backups) rings. Normalized, de-duplicated, invalid entries dropped.
-  const ringNumbers = [
+  // The demo line never rings a phone (the prospect hears the alert inside their own call), so it can stay on overnight.
+  const isDemo = digits === DEMO_DIGITS;
+  const ringNumbers = isDemo ? [] : [
     ...new Set(
       [client.contractor_phone, ...String(client.forward_number || '').split(',')].map(toE164).filter(Boolean)
     ),
@@ -289,7 +297,8 @@ async function deliver({ params, digits, rec, baseUrl, mode }) {
       })
     : Promise.resolve(null);
 
-  if (client.email && process.env.RESEND_API_KEY) {
+  const mailTo = isDemo ? first(process.env.OWNER_EMAIL, client.email) : client.email;
+  if (mailTo && process.env.RESEND_API_KEY) {
     const resend = new Resend(process.env.RESEND_API_KEY);
     tasks.push(
       savedPromise
@@ -301,12 +310,15 @@ async function deliver({ params, digits, rec, baseUrl, mode }) {
             timeStr,
             recordingUrl: savedUrl || recordingUrl,
             seconds,
+            demo: isDemo,
           });
           return withTimeout(
             resend.emails.send({
               from: process.env.RESEND_FROM || 'Heartland Dispatch <onboarding@resend.dev>',
-              to: client.email,
-              subject: `🚨 Emergency call from ${prettyCaller} - call back now`,
+              to: mailTo,
+              subject: isDemo
+                ? `📞 Demo lead: ${prettyCaller} just tried the demo line`
+                : `🚨 Emergency call from ${prettyCaller} - call back now`,
               text: mail.text,
               html: mail.html,
             }),
@@ -382,6 +394,24 @@ async function deliver({ params, digits, rec, baseUrl, mode }) {
   ]);
 
   return { outcome, channels, clientName };
+}
+
+// ---------- the demo line: the prospect hears the contractor's alert inside their own call ----------
+// Nothing rings and nobody has to be awake. The owner gets the lead by email (see deliver()).
+function demoPlayback(params) {
+  const spoken = spokenDigits(params.caller || params.From) || 'unknown';
+  const audioRaw = first(
+    params.RecordingUrl,
+    params.recording_url,
+    params.data?.payload?.recording_url,
+    params.data?.payload?.recording_urls?.mp3
+  );
+  const audio = /^https:\/\//i.test(audioRaw) ? audioRaw : '';
+  return xml(`${say(`Got it. Here is exactly what the contractor hears. The moment a customer finishes leaving a message, the contractor's phone rings with this.`)}
+${say(`This is Heartland Dispatch with an emergency call alert for your company. A customer called while you were unavailable. Their number is ${esc(spoken)}. Here is their message.`)}
+${audio ? `<Play>${esc(audio)}</Play>` : say('Your recorded message would play here.')}
+${say(`That was the message. Their number again is ${esc(spoken)}. The recording also goes to the contractor's email, with a call back button. That is the whole service. To turn it on for your business, use the sign up link in my message. The first 10 days are free. Goodbye.`)}
+<Hangup />`);
 }
 
 function closingMessage(result) {
@@ -504,6 +534,16 @@ ${say(`That was the message. Their number again is ${esc(spoken)}. The recording
       const duration = Number(params.RecordingDuration);
       if (Number.isFinite(duration) && duration < 2 && rec < 2 && digits.length === 10) {
         return res.status(200).send(recordXml(digits, rec + 1, SAY.silent));
+      }
+
+      // Demo line: email you the lead, then play the contractor's alert back to the caller on this same call. Never rings a phone.
+      if (digits === DEMO_DIGITS) {
+        try {
+          await deliver({ params, digits, rec, baseUrl, mode: 'action' });
+        } catch (e) {
+          console.error('DEMO DELIVERY FAILED (playing the demo anyway):', e.message);
+        }
+        return res.status(200).send(demoPlayback(params));
       }
 
       let result;
@@ -652,7 +692,7 @@ ${say(`That was the message. Their number again is ${esc(spoken)}. The recording
       if (digits.length !== 10 || choice === '2') {
         return res.status(200).send(askForNumber(SAY.again, 1));
       }
-      return res.status(200).send(recordXml(digits, 1, SAY.record));
+      return res.status(200).send(recordXml(digits, 1, digits === DEMO_DIGITS ? SAY.demoRecord : SAY.record));
     }
 
     // ---------- STEP 1: greeting + ask for the contractor's number ----------
